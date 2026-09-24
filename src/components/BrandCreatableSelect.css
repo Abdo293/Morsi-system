@@ -1,0 +1,244 @@
+.brand-creatable-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.brand-creatable-trigger {
+  display: flex;
+  width: 100%;
+  height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 13px;
+  border: 1px solid #dfd5ca;
+  border-radius: 10px;
+  background: #fff;
+  color: #241c18;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+  direction: rtl;
+  box-shadow: 0 1px 3px #241c180d;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+
+.brand-creatable-trigger:hover {
+  border-color: #c99a59;
+  background: #fffaf5;
+}
+
+.brand-creatable-trigger:focus-visible,
+.brand-creatable-trigger.open {
+  outline: none;
+  border-color: #785038;
+  box-shadow: 0 0 0 3px #78503826;
+}
+
+.brand-creatable-trigger.placeholder {
+  color: #9b897b;
+}
+
+.brand-creatable-trigger-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-creatable-chevron {
+  display: inline-flex;
+  flex: none;
+  color: #785038;
+  transition: transform .15s ease;
+}
+
+.brand-creatable-trigger.open .brand-creatable-chevron {
+  transform: rotate(180deg);
+}
+
+.brand-creatable-dropdown {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  left: 0;
+  z-index: 9999;
+  min-width: 220px;
+  overflow: hidden;
+  border: 1px solid #e9e1d9;
+  border-radius: 11px;
+  background: #fff;
+  direction: rtl;
+  box-shadow: 0 12px 32px #241c182e;
+  animation: select-enter .12s ease-out;
+}
+
+.brand-creatable-search-box {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f0eae4;
+  background: #faf8f5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-creatable-search-icon {
+  color: #9b897b;
+  flex: none;
+}
+
+.brand-creatable-search-input {
+  width: 100%;
+  height: 36px;
+  padding: 6px 10px !important;
+  border: 1px solid #dfd5ca !important;
+  border-radius: 8px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  outline: none !important;
+  background: #fff !important;
+  color: #241c18 !important;
+}
+
+.brand-creatable-search-input:focus {
+  border-color: #785038 !important;
+  box-shadow: 0 0 0 2px #78503820 !important;
+}
+
+.brand-creatable-clear-btn {
+  border: none;
+  background: none;
+  color: #9b897b;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.brand-creatable-clear-btn:hover {
+  color: #5d3a28;
+}
+
+.brand-creatable-viewport {
+  max-height: 250px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.brand-creatable-add-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  margin-bottom: 6px;
+  border: 1.5px dashed #c99a59;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #785038;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: right;
+  transition: all .15s ease;
+}
+
+.brand-creatable-add-option:hover,
+.brand-creatable-add-option.highlighted {
+  background: #785038;
+  color: #ffffff;
+  border-color: #785038;
+}
+
+.brand-creatable-add-option small {
+  font-size: 11px;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+.brand-creatable-add-option:hover small,
+.brand-creatable-add-option.highlighted small {
+  color: #f3eae3;
+}
+
+.brand-creatable-item {
+  position: relative;
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  padding: 7px 11px 7px 34px;
+  border-radius: 7px;
+  color: #241c18;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  direction: rtl;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+  transition: background .1s ease, color .1s ease;
+}
+
+.brand-creatable-item:hover,
+.brand-creatable-item.highlighted {
+  background: #f6efe7;
+  color: #5d3a28;
+}
+
+.brand-creatable-item.selected {
+  font-weight: 800;
+}
+
+.brand-creatable-check {
+  position: absolute;
+  left: 11px;
+  color: #785038;
+  font-weight: 800;
+}
+
+.brand-creatable-empty {
+  padding: 16px 12px;
+  text-align: center;
+  color: #9b897b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3px;
+}
+
+.field-quick-add {
+  border: none;
+  background: none;
+  color: #785038;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  transition: color .15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.field-quick-add:hover {
+  color: #a97854;
+  text-decoration: underline;
+}
+
+.form-grid .brand-creatable-trigger {
+  height: 40px;
+  border-radius: 9px;
+  border-color: #e0d7ce;
+  font-size: 13px;
+  box-shadow: none;
+}
