@@ -76,7 +76,16 @@ pub fn run() {
                 .map_err(|error| std::io::Error::other(format!("فشل تهيئة قاعدة البيانات: {error}")))?;
             log_startup_stage("database ready");
             app.manage(state);
+            log_startup_stage("setup complete");
             Ok(())
+        })
+        .on_page_load(|webview, payload| {
+            log_startup_stage(&format!(
+                "page load {:?}: {} ({})",
+                payload.event(),
+                webview.label(),
+                payload.url()
+            ));
         })
         .on_window_event(|_, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -165,7 +174,18 @@ pub fn run() {
             storage::save_backup_settings,
             storage::open_backups_directory,
         ])
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!())
+        .map(|app| {
+            log_startup_stage("application built");
+            app.run(|_, event| match event {
+                tauri::RunEvent::Ready => log_startup_stage("event loop ready"),
+                tauri::RunEvent::ExitRequested { code, .. } => {
+                    log_startup_stage(&format!("exit requested: {code:?}"));
+                }
+                tauri::RunEvent::Exit => log_startup_stage("event loop exit"),
+                _ => {}
+            });
+        });
 
     match result {
         Ok(()) => log_startup_stage("application exited normally"),

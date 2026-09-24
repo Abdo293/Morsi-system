@@ -20,7 +20,7 @@ npm run tauri dev
 
 ## تشخيص إغلاق نسخة Windows عند الفتح
 
-مثبت Windows من الإصدار 0.1.2 يضمّن مثبت WebView2 دون الحاجة إلى تنزيله وقت التثبيت. إذا استمر إغلاق البرنامج، افتح `%LOCALAPPDATA%\com.morsi.forbelt\startup.log` بعد محاولة تشغيله، وأرسل آخر السطور للتشخيص. قد يظهر `startup-error.log` في المجلد نفسه إذا أعاد Tauri خطأ أثناء بدء التشغيل. إذا لم يتكوّن أي سجل، راجع الخطأ في Event Viewer ← Windows Logs ← Application. لا تحذف مجلد البيانات أو ملف `cashier.sqlite` أثناء التشخيص.
+إذا استمر إغلاق البرنامج، افتح `%LOCALAPPDATA%\com.morsi.forbelt\startup.log` بعد محاولة تشغيله، وأرسل آخر السطور للتشخيص. قد يظهر `startup-error.log` في المجلد نفسه إذا أعاد Tauri خطأ أثناء بدء التشغيل. إذا لم يتكوّن أي سجل، راجع الخطأ في Event Viewer ← Windows Logs ← Application. لا تحذف مجلد البيانات أو ملف `cashier.sqlite` أثناء التشخيص.
 
 ## حفظ البيانات والتحديثات
 
