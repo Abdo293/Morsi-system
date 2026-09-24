@@ -26,6 +26,20 @@ fn log_startup_stage(stage: &str) {
     }
 }
 
+fn log_main_window_state(app: &tauri::AppHandle, stage: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        log_startup_stage(&format!(
+            "{stage}: visible={:?}, minimized={:?}, position={:?}, size={:?}",
+            window.is_visible(),
+            window.is_minimized(),
+            window.outer_position(),
+            window.outer_size()
+        ));
+    } else {
+        log_startup_stage(&format!("{stage}: main window missing"));
+    }
+}
+
 fn report_startup_error(error: &tauri::Error) {
     use std::io::Write;
 
@@ -177,8 +191,31 @@ pub fn run() {
         .build(tauri::generate_context!())
         .map(|app| {
             log_startup_stage("application built");
-            app.run(|_, event| match event {
-                tauri::RunEvent::Ready => log_startup_stage("event loop ready"),
+            app.run(|app, event| match event {
+                tauri::RunEvent::Ready => {
+                    log_startup_stage("event loop ready");
+                    log_main_window_state(app, "window at ready");
+                    let handle = app.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        log_main_window_state(&handle, "window after 3 seconds");
+                        if let Some(window) = handle.get_webview_window("main") {
+                            let hidden = matches!(window.is_visible(), Ok(false));
+                            let minimized = matches!(window.is_minimized(), Ok(true));
+                            if hidden || minimized {
+                                log_startup_stage("restoring hidden or minimized window");
+                                if minimized {
+                                    log_startup_stage(&format!("unminimize result: {:?}", window.unminimize()));
+                                }
+                                if hidden {
+                                    log_startup_stage(&format!("show result: {:?}", window.show()));
+                                }
+                                log_startup_stage(&format!("focus result: {:?}", window.set_focus()));
+                                log_main_window_state(&handle, "window after restore");
+                            }
+                        }
+                    });
+                },
                 tauri::RunEvent::ExitRequested { code, .. } => {
                     log_startup_stage(&format!("exit requested: {code:?}"));
                 }
