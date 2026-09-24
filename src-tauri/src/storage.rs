@@ -287,6 +287,7 @@ impl AppState {
     pub async fn open(app: &tauri::AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
         let data_dir = app.path().app_local_data_dir()?;
         std::fs::create_dir_all(&data_dir)?;
+        crate::log_startup_stage("data directory ready");
         let database_path = data_dir.join("cashier.sqlite");
         let existed = database_path.exists();
 
@@ -316,7 +317,9 @@ impl AppState {
             let backup = backup_dir.join(format!("before-v{installed_version}-to-v{target_version}-{timestamp}.sqlite"));
             sqlx::query("VACUUM INTO ?").bind(backup.to_string_lossy().into_owned()).execute(&migration_pool).await?;
         }
+        crate::log_startup_stage("database migrations started");
         MIGRATOR.run(&migration_pool).await?;
+        crate::log_startup_stage("database migrations complete");
         migration_pool.close().await;
 
         // Open application pool with foreign_keys = true for standard data integrity enforcement
@@ -329,6 +332,7 @@ impl AppState {
             .max_connections(1)
             .connect_with(options)
             .await?;
+        crate::log_startup_stage("database pool ready");
         sqlx::query("PRAGMA foreign_key_check;").execute(&pool).await?;
         sqlx::query("UPDATE attendance SET telegram_status = 'PENDING' WHERE telegram_status = 'SENDING'")
             .execute(&pool).await?;

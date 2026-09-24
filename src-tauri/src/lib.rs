@@ -1,6 +1,31 @@
 mod storage;
 use tauri::Manager;
 
+fn startup_log_dir() -> std::path::PathBuf {
+    let base_dir = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let preferred_dir = base_dir.join("com.morsi.forbelt");
+    if std::fs::create_dir_all(&preferred_dir).is_ok() {
+        preferred_dir
+    } else {
+        std::env::temp_dir()
+    }
+}
+
+fn log_startup_stage(stage: &str) {
+    use std::io::Write;
+
+    let log_path = startup_log_dir().join("startup.log");
+    if let Ok(mut log) = std::fs::OpenOptions::new().create(true).append(true).open(log_path) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|time| time.as_secs())
+            .unwrap_or_default();
+        let _ = writeln!(log, "[{timestamp}] {stage}");
+    }
+}
+
 fn report_startup_error(error: &tauri::Error) {
     use std::io::Write;
 
@@ -11,16 +36,7 @@ fn report_startup_error(error: &tauri::Error) {
         source = cause.source();
     }
 
-    let base_dir = std::env::var_os("LOCALAPPDATA")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    let preferred_dir = base_dir.join("com.morsi.forbelt");
-    let log_dir = if std::fs::create_dir_all(&preferred_dir).is_ok() {
-        preferred_dir
-    } else {
-        std::env::temp_dir()
-    };
-    let log_path = log_dir.join("startup-error.log");
+    let log_path = startup_log_dir().join("startup-error.log");
     if let Ok(mut log) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -46,12 +62,26 @@ fn report_startup_error(error: &tauri::Error) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    log_startup_stage("process started");
+    let default_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log_startup_stage(&format!("panic: {info}"));
+        default_panic_hook(info);
+    }));
+
     let result = tauri::Builder::default()
         .setup(|app| {
+            log_startup_stage("setup started");
             let state = tauri::async_runtime::block_on(storage::AppState::open(app.handle()))
                 .map_err(|error| std::io::Error::other(format!("فشل تهيئة قاعدة البيانات: {error}")))?;
+            log_startup_stage("database ready");
             app.manage(state);
             Ok(())
+        })
+        .on_window_event(|_, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                log_startup_stage("window destroyed");
+            }
         })
         .invoke_handler(tauri::generate_handler![
             storage::setup_required,
@@ -137,7 +167,11 @@ pub fn run() {
         ])
         .run(tauri::generate_context!());
 
-    if let Err(error) = result {
-        report_startup_error(&error);
+    match result {
+        Ok(()) => log_startup_stage("application exited normally"),
+        Err(error) => {
+            log_startup_stage(&format!("application error: {error}"));
+            report_startup_error(&error);
+        }
     }
 }
