@@ -1,11 +1,55 @@
 mod storage;
 use tauri::Manager;
 
+fn report_startup_error(error: &tauri::Error) {
+    use std::io::Write;
+
+    let mut details = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        details.push_str(&format!("\nالسبب: {cause}"));
+        source = cause.source();
+    }
+
+    let base_dir = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let preferred_dir = base_dir.join("com.morsi.forbelt");
+    let log_dir = if std::fs::create_dir_all(&preferred_dir).is_ok() {
+        preferred_dir
+    } else {
+        std::env::temp_dir()
+    };
+    let log_path = log_dir.join("startup-error.log");
+    if let Ok(mut log) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|time| time.as_secs())
+            .unwrap_or_default();
+        let _ = writeln!(log, "[{timestamp}] {details}\n");
+    }
+
+    let message = format!("تعذر تشغيل البرنامج.\n\n{details}\n\nملف التشخيص: {}", log_path.display());
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "user32")]
+        extern "system" {
+            fn MessageBoxW(window: *mut std::ffi::c_void, text: *const u16, title: *const u16, flags: u32) -> i32;
+        }
+        let wide_message: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+        let wide_title: Vec<u16> = "خطأ في تشغيل Morsi".encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe { MessageBoxW(std::ptr::null_mut(), wide_message.as_ptr(), wide_title.as_ptr(), 0x10); }
+    }
+    #[cfg(not(target_os = "windows"))]
+    eprintln!("{message}");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let result = tauri::Builder::default()
         .setup(|app| {
-            let state = tauri::async_runtime::block_on(storage::AppState::open(app.handle()))?;
+            let state = tauri::async_runtime::block_on(storage::AppState::open(app.handle()))
+                .map_err(|error| std::io::Error::other(format!("فشل تهيئة قاعدة البيانات: {error}")))?;
             app.manage(state);
             Ok(())
         })
@@ -91,6 +135,9 @@ pub fn run() {
             storage::save_backup_settings,
             storage::open_backups_directory,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!());
+
+    if let Err(error) = result {
+        report_startup_error(&error);
+    }
 }
