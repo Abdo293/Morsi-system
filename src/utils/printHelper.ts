@@ -162,10 +162,10 @@ export function printReceiptHtml(receiptNode: HTMLElement, paperSize: "80mm" | "
       margin-bottom: 6px;
     }
     .thermal-receipt-logo {
-      max-height: 48px;
-      max-width: 140px;
+      max-height: ${is58mm ? "70px" : "95px"} !important;
+      max-width: ${is58mm ? "190px" : "260px"} !important;
       object-fit: contain;
-      margin: 0 auto 4px;
+      margin: 0 auto 6px;
       display: block;
       filter: grayscale(100%) contrast(160%);
     }
@@ -181,7 +181,29 @@ export function printReceiptHtml(receiptNode: HTMLElement, paperSize: "80mm" | "
       font-weight: 700;
       color: #000;
       text-align: center;
-      margin: 2px 0 4px;
+      margin: 2px 0 3px;
+    }
+    .thermal-receipt-contacts {
+      font-size: 10.5px;
+      color: #000;
+      margin: 2px 0 3px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      text-align: center;
+    }
+    .thermal-receipt-contacts-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 4px;
+    }
+    .thermal-receipt-contacts-row span {
+      font-weight: 600;
+    }
+    .thermal-receipt-contacts-row strong {
+      font-weight: 800;
+      letter-spacing: 0.3px;
     }
     .thermal-receipt-divider-double {
       border-bottom: 2px dashed #000;
@@ -409,7 +431,7 @@ export function printReportHtml(reportNode: HTMLElement, reportTitle: string): P
       </div>
       <h1>${reportTitle}</h1>
       <div class="report-meta">
-        <span>تاريخ الطباعة: ${new Date().toLocaleDateString("ar-EG", { year: "numeric", month: "long", day: "numeric" })} - ${new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}</span>
+        <span>تاريخ الطباعة: ${new Date().toLocaleDateString("en-GB", { year: "numeric", month: "2-digit", day: "2-digit" })} - ${new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
         <span>المتجر: طنطا - شارع القنطرة</span>
       </div>
     </div>
@@ -490,7 +512,7 @@ export function printBarcodeStickersHtml(
       overflow: hidden;
     }
     .barcode-label-name {
-      font-size: ${labelSize === "compact" ? "9px" : labelSize === "standard" ? "11px" : "13px"};
+      font-size: ${labelSize === "compact" ? "10.5px" : labelSize === "standard" ? "12.5px" : "15px"};
       font-weight: 800;
       white-space: nowrap;
       overflow: hidden;
@@ -500,7 +522,7 @@ export function printBarcodeStickersHtml(
       line-height: 1.15;
     }
     .barcode-label-variant {
-      font-size: ${labelSize === "compact" ? "7.5px" : "9px"};
+      font-size: ${labelSize === "compact" ? "8.5px" : labelSize === "standard" ? "10px" : "11.5px"};
       color: #222;
       margin: 0;
       white-space: nowrap;
@@ -514,7 +536,7 @@ export function printBarcodeStickersHtml(
       font-weight: bold;
     }
     .barcode-label-loc {
-      font-size: ${labelSize === "compact" ? "7.5px" : "8.5px"};
+      font-size: ${labelSize === "compact" ? "8.5px" : labelSize === "standard" ? "9.5px" : "11px"};
       color: #444;
       white-space: nowrap;
       overflow: hidden;
@@ -531,20 +553,22 @@ export function printBarcodeStickersHtml(
       margin: 1px 0;
     }
     .barcode-label-svg-wrap svg {
-      max-width: 95%;
-      height: ${labelSize === "compact" ? "20px" : labelSize === "standard" ? "28px" : "36px"} !important;
+      width: 68% !important;
+      max-width: 72% !important;
+      height: ${labelSize === "compact" ? "22px" : labelSize === "standard" ? "30px" : "38px"} !important;
       display: block;
+      margin: 0 auto !important;
     }
     .barcode-label-code {
-      font-family: monospace;
-      font-size: ${labelSize === "compact" ? "8px" : "9.5px"};
-      font-weight: 800;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: ${labelSize === "compact" ? "9.5px" : labelSize === "standard" ? "11px" : "13px"};
+      font-weight: 900;
       letter-spacing: 1px;
       line-height: 1;
       margin-top: 1px;
     }
     .barcode-label-price {
-      font-size: ${labelSize === "compact" ? "9.5px" : labelSize === "standard" ? "12px" : "14px"};
+      font-size: ${labelSize === "compact" ? "11.5px" : labelSize === "standard" ? "13.5px" : "16px"};
       font-weight: 900;
       line-height: 1.15;
       margin: 0;

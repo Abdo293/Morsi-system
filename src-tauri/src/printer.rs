@@ -6,6 +6,18 @@ pub async fn get_default_receipt_printer() -> Result<String, String> {
 }
 
 #[tauri::command]
+pub async fn set_default_receipt_printer(printer_name: String) -> Result<(), String> {
+    if printer_name.trim().is_empty() {
+        return Err("اختر الطابعة أولاً".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        platform::set_default_printer(&printer_name)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 pub async fn list_receipt_printers() -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(platform::list_printers)
         .await
@@ -64,6 +76,46 @@ pub async fn print_thermal_bitmap(
             cut_paper,
             drawer_pin,
         )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[derive(serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ThermalLabelBitmap {
+    pub width_bytes: u16,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
+#[tauri::command]
+pub async fn print_thermal_labels(
+    printer_name: String,
+    labels: Vec<ThermalLabelBitmap>,
+    paper_width_mm: Option<u16>,
+    paper_height_mm: Option<u16>,
+) -> Result<(), String> {
+    if printer_name.trim().is_empty() {
+        return Err("اختر الطابعة الحرارية أولاً".into());
+    }
+    if labels.is_empty() || labels.len() > 3000 {
+        return Err("عدد الملصقات غير صالح".into());
+    }
+    for label in &labels {
+        if label.width_bytes == 0 || label.width_bytes > 200 || label.height == 0 || label.height > 50_000 {
+            return Err("مقاس صورة الملصق غير صالح".into());
+        }
+        if label.pixels.len() != label.width_bytes as usize * label.height as usize {
+            return Err("بيانات صورة الملصق غير مكتملة".into());
+        }
+    }
+
+    let paper_w = paper_width_mm.unwrap_or(50);
+    let paper_h = paper_height_mm.unwrap_or(30);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        platform::print_thermal_labels_gdi(&printer_name, &labels, paper_w, paper_h)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -183,6 +235,7 @@ mod platform {
             returned: *mut u32,
         ) -> i32;
         fn GetDefaultPrinterW(buffer: *mut u16, size: *mut u32) -> i32;
+        fn SetDefaultPrinterW(name: *const u16) -> i32;
         fn OpenPrinterW(name: *mut u16, handle: *mut *mut c_void, defaults: *mut c_void) -> i32;
         fn StartDocPrinterW(handle: *mut c_void, level: u32, info: *mut u8) -> u32;
         fn WritePrinter(
@@ -282,6 +335,14 @@ mod platform {
             .position(|&character| character == 0)
             .unwrap_or(buffer.len());
         Ok(String::from_utf16_lossy(&buffer[..len]))
+    }
+
+    pub fn set_default_printer(printer_name: &str) -> Result<(), String> {
+        let name_wide = wide(printer_name);
+        if unsafe { SetDefaultPrinterW(name_wide.as_ptr()) } == 0 {
+            return Err(os_error("تعذر تعيين الطابعة كافتراضية في ويندوز"));
+        }
+        Ok(())
     }
 
     pub fn list_printers() -> Result<Vec<String>, String> {
@@ -542,6 +603,130 @@ mod platform {
         Ok(())
     }
 
+    pub fn print_thermal_labels_gdi(
+        printer_name: &str,
+        labels: &[super::ThermalLabelBitmap],
+        _paper_width_mm: u16,
+        _paper_height_mm: u16,
+    ) -> Result<(), String> {
+        let driver = wide("WINSPOOL");
+        let device = wide(printer_name);
+        let dc = unsafe {
+            CreateDCW(
+                driver.as_ptr(),
+                device.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        if dc.is_null() {
+            return Err(os_error("تعذر فتح طابعة ويندوز"));
+        }
+
+        let result = (|| {
+            let title = wide("Morsi thermal labels");
+            let info = DocInfoW {
+                size: std::mem::size_of::<DocInfoW>() as i32,
+                name: title.as_ptr(),
+                output: std::ptr::null(),
+                data_type: std::ptr::null(),
+                flags: 0,
+            };
+            if unsafe { StartDocW(dc, &info) } <= 0 {
+                return Err(os_error("تعذر بدء طباعة الملصقات من تعريف ويندوز"));
+            }
+
+            const HORZRES: i32 = 8;
+            let printable_width = unsafe { GetDeviceCaps(dc, HORZRES) };
+            if printable_width <= 0 {
+                return Err("تعذر قراءة دقة ومساحة الطباعة من تعريف الطابعة".into());
+            }
+
+            let mut print_result = Ok(());
+
+            for label in labels {
+                if unsafe { StartPage(dc) } <= 0 {
+                    print_result = Err(os_error("تعذر بدء صفحة الملصق"));
+                    break;
+                }
+
+                let src_width_pixels = (label.width_bytes as i32) * 8;
+                let dest_width = printable_width;
+                let dest_height = ((label.height as f64 * dest_width as f64) / (src_width_pixels as f64)).round() as i32;
+
+                let padded_stride = (label.width_bytes as usize).div_ceil(4) * 4;
+                let mut bottom_up_pixels = vec![0u8; padded_stride * label.height as usize];
+
+                for src_y in 0..label.height as usize {
+                    let dst_y = (label.height as usize - 1) - src_y;
+                    let src_offset = src_y * label.width_bytes as usize;
+                    let dst_offset = dst_y * padded_stride;
+                    bottom_up_pixels[dst_offset..dst_offset + label.width_bytes as usize]
+                        .copy_from_slice(&label.pixels[src_offset..src_offset + label.width_bytes as usize]);
+                }
+
+                let bitmap = BitmapInfo {
+                    header: BitmapInfoHeader {
+                        size: std::mem::size_of::<BitmapInfoHeader>() as u32,
+                        width: src_width_pixels,
+                        height: label.height as i32,
+                        planes: 1,
+                        bit_count: 1,
+                        compression: 0,
+                        image_size: bottom_up_pixels.len() as u32,
+                        x_pels_per_meter: 0,
+                        y_pels_per_meter: 0,
+                        colors_used: 2,
+                        colors_important: 2,
+                    },
+                    colors: [[255, 255, 255, 0], [0, 0, 0, 0]],
+                };
+
+                const DIB_RGB_COLORS: u32 = 0;
+                const SRCCOPY: u32 = 0x00cc0020;
+                let printed = unsafe {
+                    StretchDIBits(
+                        dc,
+                        0,
+                        0,
+                        dest_width,
+                        dest_height,
+                        0,
+                        0,
+                        src_width_pixels,
+                        label.height as i32,
+                        bottom_up_pixels.as_ptr().cast(),
+                        &bitmap,
+                        DIB_RGB_COLORS,
+                        SRCCOPY,
+                    )
+                };
+
+                let page_end = unsafe { EndPage(dc) };
+
+                if printed <= 0 {
+                    print_result = Err(os_error("تعذر رسم الملصق على تعريف الطابعة"));
+                    break;
+                }
+                if page_end <= 0 {
+                    print_result = Err(os_error("تعذر إنهاء صفحة الملصق"));
+                    break;
+                }
+            }
+
+            let doc_end = if unsafe { EndDoc(dc) } <= 0 {
+                Err(os_error("تعذر إنهاء مهمة طباعة الملصقات"))
+            } else {
+                Ok(())
+            };
+
+            print_result.and(doc_end)
+        })();
+
+        unsafe { DeleteDC(dc) };
+        result
+    }
+
     pub fn print_document(
         printer_name: &str,
         pages: &[super::DocumentBitmapPage],
@@ -673,6 +858,10 @@ mod platform {
         Err("طابعات ويندوز متاحة داخل نسخة التطبيق المثبتة على ويندوز".into())
     }
 
+    pub fn set_default_printer(_: &str) -> Result<(), String> {
+        Ok(())
+    }
+
     pub fn list_printers() -> Result<Vec<String>, String> {
         Err("طابعات ويندوز متاحة داخل نسخة التطبيق المثبتة على ويندوز".into())
     }
@@ -685,6 +874,12 @@ mod platform {
         _: &str, _: u16, _: u32, _: &[u8], _: u16, _: u16, _: bool, _: Option<u8>,
     ) -> Result<(), String> {
         Err("الطباعة الحرارية المباشرة متاحة حالياً على ويندوز".into())
+    }
+
+    pub fn print_thermal_labels_gdi(
+        _: &str, _: &[super::ThermalLabelBitmap], _: u16, _: u16,
+    ) -> Result<(), String> {
+        Err("الطباعة الحرارية المباشرة للملصقات متاحة حالياً على ويندوز".into())
     }
 
     pub fn print_document(_: &str, _: &[super::DocumentBitmapPage]) -> Result<(), String> {

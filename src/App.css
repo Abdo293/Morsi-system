@@ -178,21 +178,23 @@ input[type=number] {
 
 /* BARCODE THERMAL PRINTER STICKERS */
 .barcode-stickers-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 14px;
-  padding: 10px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 12px 6px;
 }
 
 .barcode-label-card {
   width: 190px;
   min-height: 115px;
   background: #fff;
-  border: 1px solid #000;
+  border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 6px;
   padding: 8px 6px;
   text-align: center;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -230,7 +232,7 @@ input[type=number] {
 }
 
 .barcode-label-variant {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: #111;
   direction: rtl;
@@ -246,12 +248,12 @@ input[type=number] {
 }
 
 .barcode-label-card.size-compact .barcode-label-variant {
-  font-size: 9px;
+  font-size: 10px;
   gap: 3px;
 }
 
 .barcode-label-card.size-large .barcode-label-variant {
-  font-size: 11.5px;
+  font-size: 12.5px;
   gap: 6px;
 }
 
@@ -262,7 +264,7 @@ input[type=number] {
 }
 
 .barcode-label-name {
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 800;
   color: #000;
   max-width: 100%;
@@ -274,17 +276,17 @@ input[type=number] {
 }
 
 .barcode-label-card.size-compact .barcode-label-name {
-  font-size: 10.5px;
+  font-size: 11.5px;
 }
 
 .barcode-label-card.size-large .barcode-label-name {
-  font-size: 13.5px;
+  font-size: 15px;
 }
 
 .barcode-label-loc {
-  font-size: 10px;
-  font-weight: 600;
-  color: #333;
+  font-size: 11px;
+  font-weight: 700;
+  color: #222;
   direction: rtl;
   max-width: 100%;
   overflow: hidden;
@@ -293,23 +295,41 @@ input[type=number] {
   line-height: 1.2;
 }
 
+.barcode-label-card.size-compact .barcode-label-loc {
+  font-size: 10px;
+}
+
+.barcode-label-card.size-large .barcode-label-loc {
+  font-size: 12.5px;
+}
+
 .barcode-label-svg-wrap {
   width: 100%;
   margin: 3px 0 2px;
 }
 
 .barcode-label-code {
-  font-family: monospace;
-  font-size: 11px;
-  font-weight: 800;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12.5px;
+  font-weight: 900;
   letter-spacing: 1.5px;
   color: #000;
   margin-top: 2px;
-  line-height: 1;
+  line-height: 1.1;
+}
+
+.barcode-label-card.size-compact .barcode-label-code {
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.barcode-label-card.size-large .barcode-label-code {
+  font-size: 14px;
+  letter-spacing: 2px;
 }
 
 .barcode-label-price {
-  font-size: 13px;
+  font-size: 14.5px;
   font-weight: 900;
   color: #000;
   direction: rtl;
@@ -317,11 +337,11 @@ input[type=number] {
 }
 
 .barcode-label-card.size-compact .barcode-label-price {
-  font-size: 11px;
+  font-size: 12.5px;
 }
 
 .barcode-label-card.size-large .barcode-label-price {
-  font-size: 15px;
+  font-size: 16.5px;
 }
 
 @media print {
@@ -346,7 +366,7 @@ input[type=number] {
   }
   .barcode-label-card {
     box-shadow: none !important;
-    border: 1px solid #000 !important;
+    border: none !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
@@ -401,21 +421,37 @@ input[type=number] {
   .barcode-label-inner { gap: 0.3mm !important; }
   .barcode-label-svg-wrap { margin: 0 !important; }
   .barcode-label-svg-wrap svg {
-    width: 90% !important;
-    max-width: 100% !important;
+    width: 68% !important;
+    max-width: 72% !important;
+    height: 8.5mm !important;
+    margin: 0 auto !important;
+    display: block !important;
+  }
+  .barcode-label-card.size-compact .barcode-label-svg-wrap svg {
+    width: 68% !important;
+    max-width: 70% !important;
     height: 7mm !important;
   }
-  .barcode-label-card.size-compact .barcode-label-svg-wrap svg { height: 6mm !important; }
-  .barcode-label-card.size-large .barcode-label-svg-wrap svg { height: 10mm !important; }
-  .barcode-label-name { font-size: 8pt !important; }
+  .barcode-label-card.size-large .barcode-label-svg-wrap svg {
+    width: 68% !important;
+    max-width: 72% !important;
+    height: 11mm !important;
+  }
+  .barcode-label-name { font-size: 9.5pt !important; }
   .barcode-label-variant,
-  .barcode-label-loc { font-size: 6.5pt !important; }
-  .barcode-label-code { font-size: 7pt !important; margin-top: 0 !important; }
-  .barcode-label-price { font-size: 8pt !important; }
-  .barcode-label-card.size-compact .barcode-label-name { font-size: 7pt !important; }
+  .barcode-label-loc { font-size: 7.5pt !important; }
+  .barcode-label-code { font-size: 8.5pt !important; margin-top: 0.5mm !important; font-weight: 900 !important; }
+  .barcode-label-price { font-size: 9.5pt !important; }
+  .barcode-label-card.size-compact .barcode-label-name { font-size: 8.5pt !important; }
   .barcode-label-card.size-compact .barcode-label-variant,
-  .barcode-label-card.size-compact .barcode-label-loc { font-size: 6pt !important; }
-  .barcode-label-card.size-compact .barcode-label-price { font-size: 7pt !important; }
+  .barcode-label-card.size-compact .barcode-label-loc { font-size: 7pt !important; }
+  .barcode-label-card.size-compact .barcode-label-code { font-size: 7.5pt !important; }
+  .barcode-label-card.size-compact .barcode-label-price { font-size: 8.5pt !important; }
+  .barcode-label-card.size-large .barcode-label-name { font-size: 11.5pt !important; }
+  .barcode-label-card.size-large .barcode-label-variant,
+  .barcode-label-card.size-large .barcode-label-loc { font-size: 9pt !important; }
+  .barcode-label-card.size-large .barcode-label-code { font-size: 10.5pt !important; }
+  .barcode-label-card.size-large .barcode-label-price { font-size: 12pt !important; }
 }
 .attendance-widget{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px;background:#fffaf4}.attendance-widget strong{color:#543729}.attendance-widget p{margin:2px 0;font-size:12px}.attendance-widget small{display:block;color:#785038}.attendance-error{width:100%;color:#a34331!important;margin:0!important}.staff-admin-stack{display:grid;gap:20px}.staff-form-grid{display:grid;grid-template-columns:2fr 1.5fr 1fr auto;gap:12px;align-items:end}.staff-form-grid label{margin:0}.staff-form-grid button{min-height:42px}.staff-actions{display:flex;gap:9px;flex-wrap:wrap;margin:12px 0}.staff-filters{display:flex;gap:12px;align-items:end;margin-bottom:16px;flex-wrap:wrap}.staff-filters>.field{min-width:230px}.staff-filters label{margin:0}.staff-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:20px}.staff-summary>div{border:1px solid #e9e1d9;background:#faf8f5;border-radius:10px;padding:12px}.staff-summary span,.staff-summary strong{display:block}.staff-summary span{font-size:12px;color:#8b7b70}.staff-summary strong{margin-top:5px;font-size:16px;color:#543729}.staff-money-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.staff-money-grid form{border:1px solid #e9e1d9;border-radius:12px;padding:16px;background:#fffdfb}.staff-money-grid h3{margin-bottom:12px}.staff-money-grid label{display:block}.staff-admin-stack .panel>h3{margin:24px 0 10px}.staff-repayment{display:flex;align-items:end;flex-wrap:wrap;gap:10px;padding:14px;margin-top:12px;background:#fff8ee;border:1px solid #e2c9a8;border-radius:10px}.staff-repayment label{min-width:150px;margin:0}@media(max-width:1000px){.staff-form-grid,.staff-money-grid{grid-template-columns:1fr}}
 
@@ -1128,12 +1164,17 @@ input[type=number] {
 }
 
 .thermal-receipt-logo {
-  max-height: 48px;
-  max-width: 140px;
+  max-height: 95px;
+  max-width: 260px;
   object-fit: contain;
-  margin: 0 auto 4px;
+  margin: 0 auto 6px;
   display: block;
   filter: grayscale(100%) contrast(150%);
+}
+
+.thermal-receipt-card.width-58mm .thermal-receipt-logo {
+  max-height: 70px;
+  max-width: 190px;
 }
 
 .thermal-receipt-title {
@@ -1156,6 +1197,33 @@ input[type=number] {
   color: #000;
   margin: 2px 0 3px;
   letter-spacing: 0.2px;
+}
+
+.thermal-receipt-contacts {
+  font-size: 11.5px;
+  color: #111;
+  margin: 4px 0 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
+
+.thermal-receipt-contacts-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+}
+
+.thermal-receipt-contacts-row span {
+  font-weight: 600;
+}
+
+.thermal-receipt-contacts-row strong {
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  font-family: inherit;
 }
 
 .thermal-receipt-divider-double {

@@ -1,6 +1,6 @@
 use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use chrono::{DateTime, Duration, NaiveDate, NaiveTime, Timelike, Utc};
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
 use chrono_tz::{Africa::Cairo, Tz};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
@@ -1684,8 +1684,13 @@ pub async fn get_employee_stats(
     state: tauri::State<'_, AppState>,
     token: String,
     employee_id: i64,
+    start_date: Option<String>,
+    end_date: Option<String>,
 ) -> Result<EmployeeStatsView, String> {
     state.user(&token, true)?;
+
+    let clean_start = start_date.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let clean_end = end_date.as_deref().map(str::trim).filter(|s| !s.is_empty());
 
     let emp_user_id: Option<i64> = sqlx::query_scalar("SELECT user_id FROM employees WHERE id = ?")
         .bind(employee_id)
@@ -1695,7 +1700,7 @@ pub async fn get_employee_stats(
         .flatten();
     let u_id = emp_user_id.unwrap_or(-999999);
 
-    let completed_row = sqlx::query(
+    let mut comp_sql = String::from(
         "SELECT COUNT(*) AS cnt,
                 COALESCE(SUM(subtotal_piasters), 0) AS subtotal,
                 COALESCE(SUM(discount_piasters), 0) AS discount,
@@ -1706,25 +1711,43 @@ pub async fn get_employee_stats(
                 COALESCE(SUM(remaining_piasters), 0) AS remaining
          FROM invoices
          WHERE (employee_id = ? OR (employee_id IS NULL AND seller_id = ?)) AND status = 'COMPLETED'"
-    )
-    .bind(employee_id)
-    .bind(u_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(db_error)?;
+    );
+    if clean_start.is_some() {
+        comp_sql.push_str(" AND date(created_at) >= date(?)");
+    }
+    if clean_end.is_some() {
+        comp_sql.push_str(" AND date(created_at) <= date(?)");
+    }
+    let mut comp_q = sqlx::query(&comp_sql).bind(employee_id).bind(u_id);
+    if let Some(s) = clean_start {
+        comp_q = comp_q.bind(s);
+    }
+    if let Some(e) = clean_end {
+        comp_q = comp_q.bind(e);
+    }
+    let completed_row = comp_q.fetch_one(&state.pool).await.map_err(db_error)?;
 
-    let cancelled_row = sqlx::query(
+    let mut canc_sql = String::from(
         "SELECT COUNT(*) AS cnt, COALESCE(SUM(total_piasters), 0) AS total
          FROM invoices
          WHERE (employee_id = ? OR (employee_id IS NULL AND seller_id = ?)) AND status = 'CANCELLED'"
-    )
-    .bind(employee_id)
-    .bind(u_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(db_error)?;
+    );
+    if clean_start.is_some() {
+        canc_sql.push_str(" AND date(created_at) >= date(?)");
+    }
+    if clean_end.is_some() {
+        canc_sql.push_str(" AND date(created_at) <= date(?)");
+    }
+    let mut canc_q = sqlx::query(&canc_sql).bind(employee_id).bind(u_id);
+    if let Some(s) = clean_start {
+        canc_q = canc_q.bind(s);
+    }
+    if let Some(e) = clean_end {
+        canc_q = canc_q.bind(e);
+    }
+    let cancelled_row = canc_q.fetch_one(&state.pool).await.map_err(db_error)?;
 
-    let refund_summary_row = sqlx::query(
+    let mut ref_sql = String::from(
         "SELECT COUNT(*) AS cnt,
                 COALESCE(SUM(total_refund_piasters), 0) AS total_refund,
                 COALESCE(SUM(CASE WHEN refund_method = 'CASH' THEN total_refund_piasters ELSE 0 END), 0) AS refund_cash,
@@ -1733,12 +1756,21 @@ pub async fn get_employee_stats(
                 COALESCE(SUM(CASE WHEN refund_method = 'DEBT_DEDUCTION' THEN total_refund_piasters ELSE 0 END), 0) AS refund_debt
          FROM refunds
          WHERE (employee_id = ? OR (employee_id IS NULL AND seller_id = ?))"
-    )
-    .bind(employee_id)
-    .bind(u_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(db_error)?;
+    );
+    if clean_start.is_some() {
+        ref_sql.push_str(" AND date(created_at) >= date(?)");
+    }
+    if clean_end.is_some() {
+        ref_sql.push_str(" AND date(created_at) <= date(?)");
+    }
+    let mut ref_q = sqlx::query(&ref_sql).bind(employee_id).bind(u_id);
+    if let Some(s) = clean_start {
+        ref_q = ref_q.bind(s);
+    }
+    if let Some(e) = clean_end {
+        ref_q = ref_q.bind(e);
+    }
+    let refund_summary_row = ref_q.fetch_one(&state.pool).await.map_err(db_error)?;
 
     let gross_sales: i64 = completed_row.get("total");
     let gross_subtotal: i64 = completed_row.get("subtotal");
@@ -1760,7 +1792,7 @@ pub async fn get_employee_stats(
     let net_paid_wallet = (gross_wallet - refund_wallet).max(0);
     let net_remaining = (gross_remaining - refund_debt).max(0);
 
-    let top_product_rows = sqlx::query(
+    let mut top_sql = String::from(
         "SELECT ii.name_snapshot, v.color, v.size,
                 (SUM(ii.quantity) - COALESCE(SUM(ri.quantity), 0)) AS net_qty,
                 (SUM(ii.line_total_piasters) - COALESCE(SUM(ri.refund_total_piasters), 0)) AS net_total
@@ -1774,17 +1806,23 @@ pub async fn get_employee_stats(
              FROM refund_items ri_inner
              GROUP BY ri_inner.invoice_item_id
          ) ri ON ri.invoice_item_id = ii.id
-         WHERE (i.employee_id = ? OR (i.employee_id IS NULL AND i.seller_id = ?)) AND i.status IN ('COMPLETED', 'CANCELLED')
-         GROUP BY ii.name_snapshot, v.color, v.size
-         HAVING net_qty > 0
-         ORDER BY net_qty DESC
-         LIMIT 15"
-    )
-    .bind(employee_id)
-    .bind(u_id)
-    .fetch_all(&state.pool)
-    .await
-    .map_err(db_error)?;
+         WHERE (i.employee_id = ? OR (i.employee_id IS NULL AND i.seller_id = ?)) AND i.status IN ('COMPLETED', 'CANCELLED')"
+    );
+    if clean_start.is_some() {
+        top_sql.push_str(" AND date(i.created_at) >= date(?)");
+    }
+    if clean_end.is_some() {
+        top_sql.push_str(" AND date(i.created_at) <= date(?)");
+    }
+    top_sql.push_str(" GROUP BY ii.name_snapshot, v.color, v.size HAVING net_qty > 0 ORDER BY net_qty DESC LIMIT 15");
+    let mut top_q = sqlx::query(&top_sql).bind(employee_id).bind(u_id);
+    if let Some(s) = clean_start {
+        top_q = top_q.bind(s);
+    }
+    if let Some(e) = clean_end {
+        top_q = top_q.bind(e);
+    }
+    let top_product_rows = top_q.fetch_all(&state.pool).await.map_err(db_error)?;
 
     let top_products = top_product_rows.iter().map(|r| EmployeeProductStat {
         name: r.get("name_snapshot"),
@@ -1794,20 +1832,28 @@ pub async fn get_employee_stats(
         total_piasters: r.get("net_total"),
     }).collect();
 
-    let discount_rows = sqlx::query(
+    let mut disc_sql = String::from(
         "SELECT i.invoice_number, c.name AS customer_name, i.discount_piasters,
                 i.total_piasters, i.created_at
          FROM invoices i
          LEFT JOIN customers c ON c.id = i.customer_id
-         WHERE (i.employee_id = ? OR (i.employee_id IS NULL AND i.seller_id = ?)) AND i.discount_piasters > 0 AND i.status = 'COMPLETED'
-         ORDER BY i.id DESC
-         LIMIT 50"
-    )
-    .bind(employee_id)
-    .bind(u_id)
-    .fetch_all(&state.pool)
-    .await
-    .map_err(db_error)?;
+         WHERE (i.employee_id = ? OR (i.employee_id IS NULL AND i.seller_id = ?)) AND i.discount_piasters > 0 AND i.status = 'COMPLETED'"
+    );
+    if clean_start.is_some() {
+        disc_sql.push_str(" AND date(i.created_at) >= date(?)");
+    }
+    if clean_end.is_some() {
+        disc_sql.push_str(" AND date(i.created_at) <= date(?)");
+    }
+    disc_sql.push_str(" ORDER BY i.id DESC LIMIT 50");
+    let mut disc_q = sqlx::query(&disc_sql).bind(employee_id).bind(u_id);
+    if let Some(s) = clean_start {
+        disc_q = disc_q.bind(s);
+    }
+    if let Some(e) = clean_end {
+        disc_q = disc_q.bind(e);
+    }
+    let discount_rows = disc_q.fetch_all(&state.pool).await.map_err(db_error)?;
 
     let discounts_given = discount_rows.iter().map(|r| EmployeeDiscountDetail {
         invoice_number: r.get("invoice_number"),
@@ -1817,21 +1863,29 @@ pub async fn get_employee_stats(
         created_at: r.get("created_at"),
     }).collect();
 
-    let refund_detail_rows = sqlx::query(
+    let mut ref_list_sql = String::from(
         "SELECT r.refund_number, i.invoice_number, c.name AS customer_name,
                 r.total_refund_piasters, r.refund_method, r.notes, r.created_at
          FROM refunds r
          JOIN invoices i ON i.id = r.invoice_id
          LEFT JOIN customers c ON c.id = i.customer_id
-         WHERE (r.employee_id = ? OR (r.employee_id IS NULL AND r.seller_id = ?))
-         ORDER BY r.id DESC
-         LIMIT 50"
-    )
-    .bind(employee_id)
-    .bind(u_id)
-    .fetch_all(&state.pool)
-    .await
-    .map_err(db_error)?;
+         WHERE (r.employee_id = ? OR (r.employee_id IS NULL AND r.seller_id = ?))"
+    );
+    if clean_start.is_some() {
+        ref_list_sql.push_str(" AND date(r.created_at) >= date(?)");
+    }
+    if clean_end.is_some() {
+        ref_list_sql.push_str(" AND date(r.created_at) <= date(?)");
+    }
+    ref_list_sql.push_str(" ORDER BY r.id DESC LIMIT 50");
+    let mut ref_list_q = sqlx::query(&ref_list_sql).bind(employee_id).bind(u_id);
+    if let Some(s) = clean_start {
+        ref_list_q = ref_list_q.bind(s);
+    }
+    if let Some(e) = clean_end {
+        ref_list_q = ref_list_q.bind(e);
+    }
+    let refund_detail_rows = ref_list_q.fetch_all(&state.pool).await.map_err(db_error)?;
 
     let refunds_list = refund_detail_rows.iter().map(|r| EmployeeRefundDetail {
         refund_number: r.get("refund_number"),
@@ -3370,6 +3424,8 @@ pub struct AttendanceView {
     checked_in_at: Option<String>,
     checked_out_at: Option<String>,
     late_minutes: i64,
+    overtime_minutes: i64,
+    overtime_paid: bool,
     telegram_status: Option<String>,
 }
 
@@ -3426,6 +3482,9 @@ pub struct EmployeeAccountView {
     loan_repayments_piasters: i64,
     net_salary_piasters: i64,
     total_loan_balance_piasters: i64,
+    total_overtime_minutes: i64,
+    paid_overtime_minutes: i64,
+    unpaid_overtime_minutes: i64,
     attendance: Vec<AttendanceView>,
     loans: Vec<LoanView>,
     rewards: Vec<RewardView>,
@@ -3442,6 +3501,36 @@ fn valid_period_month(value: &str) -> Result<&str, String> {
         Ok(value)
     } else {
         Err("الشهر يجب أن يكون بصيغة YYYY-MM".into())
+    }
+}
+
+fn calculate_overtime_minutes(
+    shift_date: NaiveDate,
+    shift_start: NaiveTime,
+    shift_end: NaiveTime,
+    checked_out_at: &str,
+) -> i64 {
+    let checked_out_naive = if let Ok(dt) = DateTime::parse_from_rfc3339(checked_out_at) {
+        dt.with_timezone(&Cairo).naive_local()
+    } else if let Ok(dt) = NaiveDateTime::parse_from_str(checked_out_at, "%Y-%m-%d %H:%M:%S") {
+        dt
+    } else if let Ok(dt) = NaiveDateTime::parse_from_str(checked_out_at, "%Y-%m-%dT%H:%M:%S") {
+        dt
+    } else {
+        return 0;
+    };
+
+    let scheduled_end = if shift_start > shift_end {
+        (shift_date + Duration::days(1)).and_time(shift_end)
+    } else {
+        shift_date.and_time(shift_end)
+    };
+
+    let diff_seconds = (checked_out_naive - scheduled_end).num_seconds();
+    if diff_seconds > 0 {
+        diff_seconds / 60
+    } else {
+        0
     }
 }
 
@@ -3464,16 +3553,35 @@ async fn employee_shift(pool: &SqlitePool, user_id: i64) -> Result<(i64, String,
 }
 
 async fn attendance_view(pool: &SqlitePool, employee_id: i64, shift_date: NaiveDate, start: NaiveTime, end: NaiveTime) -> Result<AttendanceView, String> {
-    let row = sqlx::query("SELECT checked_in_at, checked_out_at, late_minutes, telegram_status FROM attendance WHERE employee_id = ? AND shift_date = ?")
+    let row = sqlx::query(
+        "SELECT checked_in_at, checked_out_at, late_minutes, telegram_status,
+                COALESCE(overtime_minutes, 0) AS overtime_minutes,
+                COALESCE(overtime_paid, 0) AS overtime_paid
+         FROM attendance 
+         WHERE employee_id = ? AND shift_date = ?"
+    )
         .bind(employee_id).bind(shift_date.format("%Y-%m-%d").to_string())
         .fetch_optional(pool).await.map_err(db_error)?;
+
+    let checked_out_at: Option<String> = row.as_ref().and_then(|r| r.get("checked_out_at"));
+    let mut overtime_minutes: i64 = row.as_ref().map_or(0, |r| r.get("overtime_minutes"));
+    let overtime_paid = row.as_ref().map_or(false, |r| r.get::<i64, _>("overtime_paid") == 1);
+
+    if overtime_minutes == 0 {
+        if let Some(ref out_time) = checked_out_at {
+            overtime_minutes = calculate_overtime_minutes(shift_date, start, end, out_time);
+        }
+    }
+
     Ok(AttendanceView {
         shift_date: shift_date.format("%Y-%m-%d").to_string(),
         shift_start: start.format("%H:%M").to_string(),
         shift_end: end.format("%H:%M").to_string(),
         checked_in_at: row.as_ref().map(|r| r.get("checked_in_at")),
-        checked_out_at: row.as_ref().and_then(|r| r.get("checked_out_at")),
+        checked_out_at,
         late_minutes: row.as_ref().map_or(0, |r| r.get("late_minutes")),
+        overtime_minutes,
+        overtime_paid,
         telegram_status: row.as_ref().map(|r| r.get("telegram_status")),
     })
 }
@@ -3525,8 +3633,10 @@ async fn perform_employee_check_out(pool: &SqlitePool, employee_id: i64) -> Resu
     let (_, start, end) = employee_shift_by_id(pool, employee_id).await?;
     let now = Utc::now().with_timezone(&Cairo);
     let shift_date = attendance_shift_date(&now, start, end);
-    let changed = sqlx::query("UPDATE attendance SET checked_out_at = ? WHERE employee_id = ? AND shift_date = ? AND checked_out_at IS NULL")
-        .bind(now.to_rfc3339()).bind(employee_id).bind(shift_date.format("%Y-%m-%d").to_string())
+    let now_str = now.to_rfc3339();
+    let overtime_minutes = calculate_overtime_minutes(shift_date, start, end, &now_str);
+    let changed = sqlx::query("UPDATE attendance SET checked_out_at = ?, overtime_minutes = ? WHERE employee_id = ? AND shift_date = ? AND checked_out_at IS NULL")
+        .bind(&now_str).bind(overtime_minutes).bind(employee_id).bind(shift_date.format("%Y-%m-%d").to_string())
         .execute(pool).await.map_err(db_error)?;
     if changed.rows_affected() == 0 { return Err("لا يوجد حضور مفتوح لهذا الموظف في هذه الوردية أو تم إثبات الانصراف بالفعل".into()); }
     attendance_view(pool, employee_id, shift_date, start, end).await
@@ -3547,6 +3657,8 @@ pub struct DailyEmployeeAttendanceView {
     pub checked_in_at: Option<String>,
     pub checked_out_at: Option<String>,
     pub late_minutes: i64,
+    pub overtime_minutes: i64,
+    pub overtime_paid: bool,
     pub status: String,
 }
 
@@ -3576,7 +3688,9 @@ pub async fn get_daily_attendance(
             e.work_hours,
             a.checked_in_at,
             a.checked_out_at,
-            COALESCE(a.late_minutes, 0) AS late_minutes
+            COALESCE(a.late_minutes, 0) AS late_minutes,
+            COALESCE(a.overtime_minutes, 0) AS overtime_minutes,
+            COALESCE(a.overtime_paid, 0) AS overtime_paid
          FROM employees e
          LEFT JOIN attendance a ON a.employee_id = e.id AND a.shift_date = ?
          WHERE e.is_active = 1
@@ -3601,6 +3715,21 @@ pub async fn get_daily_attendance(
         let checked_in_at: Option<String> = row.get("checked_in_at");
         let checked_out_at: Option<String> = row.get("checked_out_at");
         let late_minutes: i64 = row.get("late_minutes");
+        let mut overtime_minutes: i64 = row.get("overtime_minutes");
+        let overtime_paid = row.get::<i64, _>("overtime_paid") == 1;
+
+        if overtime_minutes == 0 {
+            if let Some(ref out_time) = checked_out_at {
+                let start_text: String = row.get("shift_start");
+                let end_text: String = row.get("shift_end");
+                if let (Ok(start), Ok(end)) = (
+                    NaiveTime::parse_from_str(&start_text, "%H:%M"),
+                    NaiveTime::parse_from_str(&end_text, "%H:%M"),
+                ) {
+                    overtime_minutes = calculate_overtime_minutes(target_date, start, end, out_time);
+                }
+            }
+        }
 
         let status = if checked_out_at.is_some() {
             "COMPLETED".to_string()
@@ -3623,11 +3752,95 @@ pub async fn get_daily_attendance(
             checked_in_at,
             checked_out_at,
             late_minutes,
+            overtime_minutes,
+            overtime_paid,
             status,
         });
     }
 
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn toggle_attendance_overtime_paid(
+    state: tauri::State<'_, AppState>,
+    token: String,
+    employee_id: i64,
+    shift_date: String,
+) -> Result<bool, String> {
+    let _user = state.user(&token, true)?;
+    let target_date = NaiveDate::parse_from_str(shift_date.trim(), "%Y-%m-%d").map_err(|_| "تاريخ غير صحيح")?;
+    let target_date_str = target_date.format("%Y-%m-%d").to_string();
+
+    let row = sqlx::query("SELECT overtime_paid FROM attendance WHERE employee_id = ? AND shift_date = ?")
+        .bind(employee_id)
+        .bind(&target_date_str)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(db_error)?
+        .ok_or("سجل الحضور غير موجود")?;
+
+    let current: i64 = row.get("overtime_paid");
+    let next = if current == 1 { 0 } else { 1 };
+
+    sqlx::query("UPDATE attendance SET overtime_paid = ? WHERE employee_id = ? AND shift_date = ?")
+        .bind(next)
+        .bind(employee_id)
+        .bind(&target_date_str)
+        .execute(&state.pool)
+        .await
+        .map_err(db_error)?;
+
+    Ok(next == 1)
+}
+
+#[tauri::command]
+pub async fn settle_employee_overtime(
+    state: tauri::State<'_, AppState>,
+    token: String,
+    employee_id: i64,
+    period_month: String,
+    reward_amount_piasters: Option<i64>,
+    reason: Option<String>,
+) -> Result<i64, String> {
+    let admin = state.user(&token, true)?;
+    valid_period_month(&period_month)?;
+
+    let mut tx = state.pool.begin().await.map_err(db_error)?;
+
+    let updated = sqlx::query(
+        "UPDATE attendance 
+         SET overtime_paid = 1 
+         WHERE employee_id = ? AND substr(shift_date, 1, 7) = ? AND overtime_paid = 0"
+    )
+    .bind(employee_id)
+    .bind(&period_month)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?;
+
+    let rows_settled = updated.rows_affected() as i64;
+
+    if let Some(amount) = reward_amount_piasters.filter(|&a| a > 0) {
+        let default_reason = format!("مكافأة ساعات عمل إضافية لشهر {}", period_month);
+        let final_reason = reason.filter(|r| !r.trim().is_empty()).unwrap_or(default_reason);
+
+        sqlx::query(
+            "INSERT INTO employee_rewards(employee_id, amount_piasters, reason, period_month, created_by)
+             VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(employee_id)
+        .bind(amount)
+        .bind(final_reason)
+        .bind(&period_month)
+        .bind(admin.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
+    }
+
+    tx.commit().await.map_err(db_error)?;
+    Ok(rows_settled)
 }
 
 #[tauri::command]
@@ -4281,14 +4494,47 @@ pub async fn get_employee_account(
 
     let attendance_rows = sqlx::query(
         "SELECT a.shift_date, a.checked_in_at, a.checked_out_at, a.late_minutes, a.telegram_status,
+                COALESCE(a.overtime_minutes, 0) AS overtime_minutes,
+                COALESCE(a.overtime_paid, 0) AS overtime_paid,
                 e.shift_start, e.shift_end FROM attendance a JOIN employees e ON e.id = a.employee_id
          WHERE a.employee_id = ? AND substr(a.shift_date, 1, 7) = ? ORDER BY a.shift_date DESC",
     ).bind(employee_id).bind(month).fetch_all(&state.pool).await.map_err(db_error)?;
-    let attendance = attendance_rows.iter().map(|r| AttendanceView {
-        shift_date: r.get("shift_date"), shift_start: r.get("shift_start"), shift_end: r.get("shift_end"),
-        checked_in_at: r.get("checked_in_at"), checked_out_at: r.get("checked_out_at"),
-        late_minutes: r.get("late_minutes"), telegram_status: r.get("telegram_status"),
+    let attendance: Vec<AttendanceView> = attendance_rows.iter().map(|r| {
+        let shift_date_str: String = r.get("shift_date");
+        let shift_start_str: String = r.get("shift_start");
+        let shift_end_str: String = r.get("shift_end");
+        let checked_out_at: Option<String> = r.get("checked_out_at");
+        let mut overtime_minutes: i64 = r.get("overtime_minutes");
+        let overtime_paid = r.get::<i64, _>("overtime_paid") == 1;
+
+        if overtime_minutes == 0 {
+            if let Some(ref out_time) = checked_out_at {
+                if let (Ok(s_date), Ok(start), Ok(end)) = (
+                    NaiveDate::parse_from_str(&shift_date_str, "%Y-%m-%d"),
+                    NaiveTime::parse_from_str(&shift_start_str, "%H:%M"),
+                    NaiveTime::parse_from_str(&shift_end_str, "%H:%M"),
+                ) {
+                    overtime_minutes = calculate_overtime_minutes(s_date, start, end, out_time);
+                }
+            }
+        }
+
+        AttendanceView {
+            shift_date: shift_date_str,
+            shift_start: shift_start_str,
+            shift_end: shift_end_str,
+            checked_in_at: r.get("checked_in_at"),
+            checked_out_at,
+            late_minutes: r.get("late_minutes"),
+            overtime_minutes,
+            overtime_paid,
+            telegram_status: r.get("telegram_status"),
+        }
     }).collect();
+
+    let total_overtime_minutes: i64 = attendance.iter().map(|a| a.overtime_minutes).sum();
+    let paid_overtime_minutes: i64 = attendance.iter().filter(|a| a.overtime_paid).map(|a| a.overtime_minutes).sum();
+    let unpaid_overtime_minutes: i64 = attendance.iter().filter(|a| !a.overtime_paid).map(|a| a.overtime_minutes).sum();
 
     let base_salary_piasters: i64 = employee.get("base_salary_piasters");
     let rewards_piasters: i64 = rewards.iter().map(|r| r.amount_piasters).sum();
@@ -4299,7 +4545,11 @@ pub async fn get_employee_account(
         employee_id, employee_name: employee.get("name"), period_month: month.to_owned(),
         base_salary_piasters, rewards_piasters, deductions_piasters, loan_repayments_piasters,
         net_salary_piasters: base_salary_piasters + rewards_piasters - deductions_piasters - loan_repayments_piasters,
-        total_loan_balance_piasters, attendance, loans, rewards, deductions, loan_repayments,
+        total_loan_balance_piasters,
+        total_overtime_minutes,
+        paid_overtime_minutes,
+        unpaid_overtime_minutes,
+        attendance, loans, rewards, deductions, loan_repayments,
     })
 }
 

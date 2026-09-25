@@ -1,0 +1,2 @@
+ALTER TABLE attendance ADD COLUMN overtime_minutes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE attendance ADD COLUMN overtime_paid INTEGER NOT NULL DEFAULT 0;

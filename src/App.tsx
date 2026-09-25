@@ -114,7 +114,17 @@ type Dashboard = {
   low_stock_count?: number;
 };
 type Employee = { id: number; userId?: number | null; name: string; username?: string | null; permissions?: string[]; phone: string | null; jobTitle: string; address: string | null; workHours: number; hireDate: string; baseSalaryPiasters: number; shiftStart: string; shiftEnd: string };
-type Attendance = { shiftDate: string; shiftStart: string; shiftEnd: string; checkedInAt: string | null; checkedOutAt: string | null; lateMinutes: number; telegramStatus: string | null };
+type Attendance = {
+  shiftDate: string;
+  shiftStart: string;
+  shiftEnd: string;
+  checkedInAt: string | null;
+  checkedOutAt: string | null;
+  lateMinutes: number;
+  overtimeMinutes?: number;
+  overtimePaid?: boolean;
+  telegramStatus: string | null;
+};
 type DailyEmployeeAttendance = {
   employeeId: number;
   userId?: number | null;
@@ -128,13 +138,42 @@ type DailyEmployeeAttendance = {
   checkedInAt?: string | null;
   checkedOutAt?: string | null;
   lateMinutes: number;
+  overtimeMinutes?: number;
+  overtimePaid?: boolean;
   status: "NOT_ATTENDED" | "PRESENT" | "COMPLETED";
 };
 type EmployeeLoan = { id: number; amountPiasters: number; repaidPiasters: number; remainingPiasters: number; reason: string | null; createdAt: string };
 type EmployeeReward = { id: number; amountPiasters: number; reason: string; periodMonth: string; createdAt: string };
 type EmployeeDeduction = { id: number; amountPiasters: number; reason: string; periodMonth: string; createdAt: string };
 type EmployeeLoanRepayment = { id: number; loanId: number; amountPiasters: number; periodMonth: string; createdAt: string };
-type EmployeeAccount = { employeeId: number; employeeName: string; periodMonth: string; baseSalaryPiasters: number; rewardsPiasters: number; deductionsPiasters: number; loanRepaymentsPiasters: number; netSalaryPiasters: number; totalLoanBalancePiasters: number; attendance: Attendance[]; loans: EmployeeLoan[]; rewards: EmployeeReward[]; deductions: EmployeeDeduction[]; loanRepayments: EmployeeLoanRepayment[] };
+type EmployeeAccount = {
+  employeeId: number;
+  employeeName: string;
+  periodMonth: string;
+  baseSalaryPiasters: number;
+  rewardsPiasters: number;
+  deductionsPiasters: number;
+  loanRepaymentsPiasters: number;
+  netSalaryPiasters: number;
+  totalLoanBalancePiasters: number;
+  totalOvertimeMinutes?: number;
+  paidOvertimeMinutes?: number;
+  unpaidOvertimeMinutes?: number;
+  attendance: Attendance[];
+  loans: EmployeeLoan[];
+  rewards: EmployeeReward[];
+  deductions: EmployeeDeduction[];
+  loanRepayments: EmployeeLoanRepayment[];
+};
+
+function formatOvertimeDuration(minutes?: number): string {
+  if (!minutes || minutes <= 0) return "—";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0 && m > 0) return `${h} س و ${m} د`;
+  if (h > 0) return `${h} ساعة`;
+  return `${m} دقيقة`;
+}
 type TelegramSettings = {
   configured: boolean;
   chatId: string;
@@ -273,8 +312,8 @@ type ProductPayload = {
   variants: { color: string; size: string; openingQuantity: number; location?: string | null }[];
 };
 
-const money = (value: number) => `${(value / 100).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ج.م`;
-const moneyNoUnit = (value: number) => (value / 100).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (value: number) => `${(value / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ج.م`;
+const moneyNoUnit = (value: number) => (value / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const piastres = (value: string) => Math.round(Number(value || 0) * 100);
 
 function formatTime12(timeOrDateStr: string | null | undefined): string {
@@ -316,11 +355,9 @@ function formatDateTime(dateStr: string | null | undefined): string {
   }
   const date = new Date(s);
   if (isNaN(date.getTime())) return dateStr;
-  return date.toLocaleString("ar-EG", {
-    dateStyle: "short",
-    timeStyle: "short",
-    hour12: true,
-  });
+  const d = date.toLocaleDateString("en-GB", { year: "numeric", month: "2-digit", day: "2-digit" });
+  const t = formatTime12(s);
+  return `${d} ${t}`;
 }
 
 function formatDateOnly(dateStr: string | null | undefined): string {
@@ -331,7 +368,7 @@ function formatDateOnly(dateStr: string | null | undefined): string {
   }
   const date = new Date(s);
   if (isNaN(date.getTime())) return dateStr;
-  return date.toLocaleDateString("ar-EG", { year: "numeric", month: "2-digit", day: "2-digit" });
+  return date.toLocaleDateString("en-GB", { year: "numeric", month: "2-digit", day: "2-digit" });
 }
 
 function formatTimeOnly(dateStr: string | null | undefined): string {
@@ -4153,9 +4190,13 @@ function Employees({ employees, session, busy, save, reload, targetEmployeeId, o
   const [telegramNotice, setTelegramNotice] = useState("");
 
   // Employee Stats State
+  type StatsPreset = "ALL" | "TODAY" | "WEEK" | "MONTH" | "CUSTOM";
   const [employeeStats, setEmployeeStats] = useState<EmployeeStatsView | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
   const [statsError, setStatsError] = useState("");
+  const [statsPreset, setStatsPreset] = useState<StatsPreset>("ALL");
+  const [statsStartDate, setStatsStartDate] = useState("");
+  const [statsEndDate, setStatsEndDate] = useState("");
 
   // Invoice Details Modal State
   const [selectedInvoiceNumber, setSelectedInvoiceNumber] = useState<number | null>(null);
@@ -4211,16 +4252,35 @@ function Employees({ employees, session, busy, save, reload, targetEmployeeId, o
     await fetchAccount(emp.id, month);
   }
 
-  async function openStatsView(emp: Employee) {
-    setSelectedEmp(emp);
-    setSubView("stats");
+  function getStatsPresetDates(preset: StatsPreset): { start: string; end: string } {
+    const now = new Date();
+    const today = now.toLocaleDateString("en-CA");
+    if (preset === "TODAY") {
+      return { start: today, end: today };
+    }
+    if (preset === "WEEK") {
+      const day = now.getDay();
+      const diff = (day + 1) % 7;
+      const sat = new Date(now);
+      sat.setDate(now.getDate() - diff);
+      return { start: sat.toLocaleDateString("en-CA"), end: today };
+    }
+    if (preset === "MONTH") {
+      const start = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+      return { start, end: today };
+    }
+    return { start: "", end: "" };
+  }
+
+  async function fetchEmployeeStats(empId: number, start?: string, end?: string) {
     setLoadingStats(true);
     setStatsError("");
-    setEmployeeStats(null);
     try {
       const data = await invoke<EmployeeStatsView>("get_employee_stats", {
         token: session.token,
-        employeeId: emp.id,
+        employeeId: empId,
+        startDate: start || null,
+        endDate: end || null,
       });
       setEmployeeStats(data);
     } catch (err: unknown) {
@@ -4228,6 +4288,46 @@ function Employees({ employees, session, busy, save, reload, targetEmployeeId, o
     } finally {
       setLoadingStats(false);
     }
+  }
+
+  function handleApplyStatsPreset(preset: StatsPreset, empId?: number) {
+    const targetId = empId ?? selectedEmp?.id;
+    if (!targetId) return;
+    setStatsPreset(preset);
+    if (preset === "ALL") {
+      setStatsStartDate("");
+      setStatsEndDate("");
+      void fetchEmployeeStats(targetId);
+    } else if (preset === "CUSTOM") {
+      const s = statsStartDate || new Date().toLocaleDateString("en-CA");
+      const e = statsEndDate || new Date().toLocaleDateString("en-CA");
+      setStatsStartDate(s);
+      setStatsEndDate(e);
+      void fetchEmployeeStats(targetId, s, e);
+    } else {
+      const { start, end } = getStatsPresetDates(preset);
+      setStatsStartDate(start);
+      setStatsEndDate(end);
+      void fetchEmployeeStats(targetId, start, end);
+    }
+  }
+
+  function handleCustomStatsDateChange(newStart: string, newEnd: string) {
+    setStatsStartDate(newStart);
+    setStatsEndDate(newEnd);
+    if (selectedEmp) {
+      void fetchEmployeeStats(selectedEmp.id, newStart, newEnd);
+    }
+  }
+
+  async function openStatsView(emp: Employee) {
+    setSelectedEmp(emp);
+    setSubView("stats");
+    setStatsPreset("ALL");
+    setStatsStartDate("");
+    setStatsEndDate("");
+    setEmployeeStats(null);
+    await fetchEmployeeStats(emp.id);
   }
 
   function openAddView() {
@@ -5032,6 +5132,15 @@ function Employees({ employees, session, busy, save, reload, targetEmployeeId, o
               <div className="staff-summary" style={{ marginBottom: "20px" }}>
                 <div><span>الراتب الأساسي</span><strong>{money(account.baseSalaryPiasters)}</strong></div>
                 <div><span>مكافآت وحوافز</span><strong style={{ color: "#24742c" }}>+{money(account.rewardsPiasters)}</strong></div>
+                <div>
+                  <span>ساعات عمل إضافية</span>
+                  <strong style={{ color: "#92400e" }}>
+                    {formatOvertimeDuration(account.totalOvertimeMinutes)}
+                  </strong>
+                  <small style={{ fontSize: "10px", color: "#786558", display: "block", marginTop: "2px" }}>
+                    (تم صرف: {formatOvertimeDuration(account.paidOvertimeMinutes)} · معلق: {formatOvertimeDuration(account.unpaidOvertimeMinutes)})
+                  </small>
+                </div>
                 <div><span>سلف مخصومة من الراتب</span><strong style={{ color: "#b94d3f" }}>-{money(account.loanRepaymentsPiasters)}</strong></div>
                 <div><span>خصومات أخرى</span><strong style={{ color: "#b94d3f" }}>-{money(account.deductionsPiasters)}</strong></div>
                 <div><span>صافي الراتب المستحق</span><strong style={{ color: "#24742c", fontSize: "18px" }}>{money(account.netSalaryPiasters)}</strong></div>
@@ -5234,7 +5343,46 @@ function Employees({ employees, session, busy, save, reload, targetEmployeeId, o
                 {!account.deductions.length && <Empty text="لا توجد خصومات مسجلة في هذا الشهر." />}
               </div>
 
-              <h3 style={{ fontSize: "16px", marginBottom: "12px", color: "#34231c" }}>سجل الحضور والانصراف هذا الشهر</h3>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+                <h3 style={{ fontSize: "16px", margin: 0, color: "#34231c" }}>
+                  سجل الحضور والانصراف هذا الشهر ({month})
+                </h3>
+                {Boolean(account.unpaidOvertimeMinutes && account.unpaidOvertimeMinutes > 0) && session.role === "ADMIN" && (
+                  <button
+                    type="button"
+                    className="secondary print-hide"
+                    style={{
+                      fontSize: "12px",
+                      padding: "6px 12px",
+                      fontWeight: 700,
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      borderColor: "#86efac",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                    disabled={accountWorking}
+                    onClick={() => {
+                      const ans = prompt(`تسوية وصرف كافة الساعات الإضافية المعلقة (${formatOvertimeDuration(account.unpaidOvertimeMinutes)}) لهذا الموظف في شهر ${month}:\n\nإذا أردت تسجيل مكافأة مالية تضاف تلقائياً للراتب، اكتب المبلغ بالجنيه، أو اترك الحقل فارغاً للمحاسبة دون إضافة مكافأة منفصلة:`, "");
+                      if (ans === null) return;
+                      const rewardVal = ans.trim() ? piastres(ans.trim()) : null;
+                      void runAccountAction(async () => {
+                        await invoke("settle_employee_overtime", {
+                          token: session.token,
+                          employeeId: selectedEmp.id,
+                          periodMonth: month,
+                          rewardAmountPiasters: rewardVal,
+                          reason: rewardVal ? `مكافأة ساعات عمل إضافية (${formatOvertimeDuration(account.unpaidOvertimeMinutes)}) لشهر ${month}` : null,
+                        });
+                        await fetchAccount(selectedEmp.id, month);
+                      }, `تمت تسوية واعتماد صرف كافة الساعات الإضافية بنجاح.`);
+                    }}
+                  >
+                    ⚡ تسوية وصرف الساعات الإضافية المعلقة ({formatOvertimeDuration(account.unpaidOvertimeMinutes)})
+                  </button>
+                )}
+              </div>
               <div className="table-wrap">
                 <table>
                   <thead>
@@ -5243,19 +5391,82 @@ function Employees({ employees, session, busy, save, reload, targetEmployeeId, o
                       <th>الحضور الفعلي</th>
                       <th>الانصراف</th>
                       <th>التأخير</th>
+                      <th>الوقت الإضافي (Overtime)</th>
+                      <th>حالة المحاسبة</th>
                       <th>حالة تليجرام</th>
+                      {session.role === "ADMIN" && <th className="print-hide" style={{ textAlign: "center" }}>إجراء</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {account.attendance.map((day) => (
-                      <tr key={day.shiftDate}>
-                        <td>{day.shiftDate} · {formatShiftRange(day.shiftStart, day.shiftEnd)}</td>
-                        <td>{day.checkedInAt ? formatDateTime(day.checkedInAt) : "—"}</td>
-                        <td>{day.checkedOutAt ? formatDateTime(day.checkedOutAt) : "—"}</td>
-                        <td>{day.lateMinutes ? attendanceDelay(day) : "في الموعد"}</td>
-                        <td>{day.telegramStatus === "SENT" ? "تم الإرسال" : day.telegramStatus === "FAILED" ? "فشل — يحتاج إعادة محاولة" : day.telegramStatus === "UNCONFIGURED" ? "تليجرام غير مهيأ" : day.telegramStatus === "PENDING" ? "قيد الإرسال" : "—"}</td>
-                      </tr>
-                    ))}
+                    {account.attendance.map((day) => {
+                      const hasOvertime = Boolean(day.overtimeMinutes && day.overtimeMinutes > 0);
+                      return (
+                        <tr key={day.shiftDate}>
+                          <td>{day.shiftDate} · {formatShiftRange(day.shiftStart, day.shiftEnd)}</td>
+                          <td>{day.checkedInAt ? formatDateTime(day.checkedInAt) : "—"}</td>
+                          <td>{day.checkedOutAt ? formatDateTime(day.checkedOutAt) : "—"}</td>
+                          <td>{day.lateMinutes ? attendanceDelay(day) : "في الموعد"}</td>
+                          <td>
+                            {hasOvertime ? (
+                              <strong style={{ color: day.overtimePaid ? "#15803d" : "#b45309" }}>
+                                +{formatOvertimeDuration(day.overtimeMinutes)}
+                              </strong>
+                            ) : (
+                              <span style={{ color: "#9ca3af" }}>—</span>
+                            )}
+                          </td>
+                          <td>
+                            {hasOvertime ? (
+                              day.overtimePaid ? (
+                                <span style={{ background: "#dcfce7", color: "#166534", padding: "3px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: 700 }}>
+                                  ✓ تم التحاسب والصرف
+                                </span>
+                              ) : (
+                                <span style={{ background: "#fef2f2", color: "#b91c1c", padding: "3px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: 700 }}>
+                                  ⏳ معلق (لم يُحاسب)
+                                </span>
+                              )
+                            ) : (
+                              <span style={{ color: "#9ca3af" }}>—</span>
+                            )}
+                          </td>
+                          <td>{day.telegramStatus === "SENT" ? "تم الإرسال" : day.telegramStatus === "FAILED" ? "فشل — يحتاج إعادة محاولة" : day.telegramStatus === "UNCONFIGURED" ? "تليجرام غير مهيأ" : day.telegramStatus === "PENDING" ? "قيد الإرسال" : "—"}</td>
+                          {session.role === "ADMIN" && (
+                            <td className="print-hide" style={{ textAlign: "center" }}>
+                              {hasOvertime ? (
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  style={{
+                                    fontSize: "11px",
+                                    padding: "3px 8px",
+                                    fontWeight: 700,
+                                    color: day.overtimePaid ? "#6b7280" : "#15803d",
+                                    borderColor: day.overtimePaid ? "#d1d5db" : "#86efac",
+                                  }}
+                                  disabled={accountWorking}
+                                  onClick={() => {
+                                    void runAccountAction(async () => {
+                                      await invoke("toggle_attendance_overtime_paid", {
+                                        token: session.token,
+                                        employeeId: selectedEmp.id,
+                                        shiftDate: day.shiftDate,
+                                      });
+                                      await fetchAccount(selectedEmp.id, month);
+                                    }, day.overtimePaid ? "تم إلغاء حالة المحاسبة" : "تم تأكيد محاسبة وصرف الساعات الإضافية");
+                                  }}
+                                  title={day.overtimePaid ? "إلغاء الصرف والرجوع لحالة معلق" : "تأكيد محاسبة وصرف الساعات الإضافية"}
+                                >
+                                  {day.overtimePaid ? "↩️ إلغاء" : "💵 تسوية"}
+                                </button>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
                 {!account.attendance.length && <Empty text="لا يوجد حضور مسجل في هذا الشهر." />}
@@ -5274,9 +5485,167 @@ function Employees({ employees, session, busy, save, reload, targetEmployeeId, o
                 {selectedEmp.name} ({selectedEmp.jobTitle})
               </p>
             </div>
-            <button type="button" className="secondary" onClick={() => void printDocumentFromPage("employee-stats", "إحصائيات الموظف")}>
-              طباعة الإحصائيات 🖨️
-            </button>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <button
+                type="button"
+                className="secondary print-hide"
+                onClick={() => {
+                  if (statsPreset === "ALL") {
+                    void fetchEmployeeStats(selectedEmp.id);
+                  } else {
+                    void fetchEmployeeStats(selectedEmp.id, statsStartDate || undefined, statsEndDate || undefined);
+                  }
+                }}
+                disabled={loadingStats}
+                title="إعادة تحميل البيانات"
+              >
+                🔄 تحديث
+              </button>
+              <button type="button" className="secondary" onClick={() => void printDocumentFromPage("employee-stats", "إحصائيات الموظف")}>
+                طباعة الإحصائيات 🖨️
+              </button>
+            </div>
+          </div>
+
+          {/* شريط فلاتر الفترة الزمنية */}
+          <div
+            className="print-hide"
+            style={{
+              background: "#faf6f0",
+              border: "1px solid #e2d4c5",
+              borderRadius: "12px",
+              padding: "12px 16px",
+              marginBottom: "16px",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "14px",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "13px", fontWeight: 700, color: "#785038" }}>
+                ⏳ تصفية حسب الفترة:
+              </span>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="preset-btn"
+                  style={statsPreset === "TODAY" ? { background: "#785038", color: "#fff", borderColor: "#785038", fontWeight: 700 } : { fontWeight: 600 }}
+                  onClick={() => handleApplyStatsPreset("TODAY")}
+                >
+                  📅 اليوم
+                </button>
+                <button
+                  type="button"
+                  className="preset-btn"
+                  style={statsPreset === "WEEK" ? { background: "#785038", color: "#fff", borderColor: "#785038", fontWeight: 700 } : { fontWeight: 600 }}
+                  onClick={() => handleApplyStatsPreset("WEEK")}
+                >
+                  🗓️ هذا الأسبوع
+                </button>
+                <button
+                  type="button"
+                  className="preset-btn"
+                  style={statsPreset === "MONTH" ? { background: "#785038", color: "#fff", borderColor: "#785038", fontWeight: 700 } : { fontWeight: 600 }}
+                  onClick={() => handleApplyStatsPreset("MONTH")}
+                >
+                  📆 هذا الشهر
+                </button>
+                <button
+                  type="button"
+                  className="preset-btn"
+                  style={statsPreset === "ALL" ? { background: "#785038", color: "#fff", borderColor: "#785038", fontWeight: 700 } : { fontWeight: 600 }}
+                  onClick={() => handleApplyStatsPreset("ALL")}
+                >
+                  ♾️ طول الوقت
+                </button>
+                <button
+                  type="button"
+                  className="preset-btn"
+                  style={statsPreset === "CUSTOM" ? { background: "#785038", color: "#fff", borderColor: "#785038", fontWeight: 700 } : { fontWeight: 600 }}
+                  onClick={() => handleApplyStatsPreset("CUSTOM")}
+                >
+                  🎯 مخصص
+                </button>
+              </div>
+            </div>
+
+            {statsPreset === "CUSTOM" && (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <label style={{ margin: 0, fontSize: "12px", fontWeight: 600, color: "#5a4539" }}>من:</label>
+                  <input
+                    type="date"
+                    value={statsStartDate}
+                    onChange={(e) => handleCustomStatsDateChange(e.target.value, statsEndDate)}
+                    style={{ padding: "6px 10px", borderRadius: "8px", border: "1px solid #dfd5ca", fontSize: "12px" }}
+                  />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <label style={{ margin: 0, fontSize: "12px", fontWeight: 600, color: "#5a4539" }}>إلى:</label>
+                  <input
+                    type="date"
+                    value={statsEndDate}
+                    onChange={(e) => handleCustomStatsDateChange(statsStartDate, e.target.value)}
+                    style={{ padding: "6px 10px", borderRadius: "8px", border: "1px solid #dfd5ca", fontSize: "12px" }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {employees.length > 1 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: "220px" }}>
+                <span style={{ fontSize: "12px", fontWeight: 700, color: "#785038", whiteSpace: "nowrap" }}>تبديل الموظف:</span>
+                <div style={{ flex: 1, minWidth: "170px" }}>
+                  <BrandSelect
+                    label="الموظف"
+                    placeholder="اختر الموظف"
+                    value={String(selectedEmp.id)}
+                    onValueChange={(val) => {
+                      const emp = employees.find((x) => x.id === Number(val));
+                      if (emp) {
+                        setSelectedEmp(emp);
+                        if (statsPreset === "ALL") {
+                          void fetchEmployeeStats(emp.id);
+                        } else {
+                          void fetchEmployeeStats(emp.id, statsStartDate || undefined, statsEndDate || undefined);
+                        }
+                      }
+                    }}
+                    options={employees.map((emp) => ({
+                      value: String(emp.id),
+                      label: `${emp.name} (${emp.jobTitle})`,
+                    }))}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* شارة نطاق الفترة (تظهر على الشاشة وتُطبع في التقرير) */}
+          <div style={{ marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "5px 12px",
+                borderRadius: "8px",
+                background: "#f0e6dc",
+                color: "#5b3823",
+                fontSize: "13px",
+                fontWeight: 700,
+                border: "1px solid #dfd0c0",
+              }}
+            >
+              📌 نطاق الإحصائيات المعروضة:{" "}
+              {statsPreset === "ALL" && "طول الوقت (جميع المبيعات المسجلة)"}
+              {statsPreset === "TODAY" && `اليوم (${statsStartDate || new Date().toLocaleDateString("en-CA")})`}
+              {statsPreset === "WEEK" && `هذا الأسبوع (${statsStartDate} إلى ${statsEndDate})`}
+              {statsPreset === "MONTH" && `هذا الشهر (${statsStartDate} إلى ${statsEndDate})`}
+              {statsPreset === "CUSTOM" && `فترة مخصصة (${statsStartDate || "البداية"} إلى ${statsEndDate || "اليوم"})`}
+            </span>
           </div>
 
           {loadingStats && <div className="empty"><p>جارٍ تحميل إحصائيات الموظف…</p></div>}
@@ -5745,6 +6114,25 @@ function DailyAttendance({ session, onGoToPos }: { session: Session; onGoToPos?:
     }
   }
 
+  async function handleToggleOvertimePaid(emp: DailyEmployeeAttendance) {
+    setActionLoading(emp.employeeId);
+    setError("");
+    setNotice("");
+    try {
+      const nextPaid = await invoke<boolean>("toggle_attendance_overtime_paid", {
+        token: session.token,
+        employeeId: emp.employeeId,
+        shiftDate: emp.shiftDate,
+      });
+      setNotice(nextPaid ? `تم تأكيد محاسبة وصرف ساعات عمل الموظف "${emp.name}" بنجاح.` : `تم إلغاء حالة المحاسبة لساعات عمل الموظف "${emp.name}".`);
+      await loadAttendance(date);
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   const isEmployeeTerminal = session.role !== "ADMIN" || Boolean(session.permissions?.includes("main_cashier" as Page));
 
   const displayList = attendanceList.filter((emp) => {
@@ -5758,6 +6146,8 @@ function DailyAttendance({ session, onGoToPos }: { session: Session; onGoToPos?:
   const presentCount = displayList.filter((e) => e.status === "PRESENT").length;
   const completedCount = displayList.filter((e) => e.status === "COMPLETED").length;
   const notAttendedCount = displayList.filter((e) => e.status === "NOT_ATTENDED").length;
+  const totalOvertimeMinutes = displayList.reduce((acc, e) => acc + (e.overtimeMinutes || 0), 0);
+  const paidOvertimeMinutes = displayList.filter((e) => e.overtimePaid).reduce((acc, e) => acc + (e.overtimeMinutes || 0), 0);
 
   const filtered = displayList.filter((emp) => {
     const matchesSearch =
@@ -5903,6 +6293,17 @@ function DailyAttendance({ session, onGoToPos }: { session: Session; onGoToPos?:
               <span style={{ fontSize: "12px", color: "#1d4ed8" }}>🔵 اكتملت ورديتهم</span>
               <strong style={{ fontSize: "20px", color: "#1e40af" }}>{completedCount}</strong>
             </div>
+            {totalOvertimeMinutes > 0 && (
+              <div className="stat" style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "10px", padding: "12px" }}>
+                <span style={{ fontSize: "12px", color: "#b45309" }}>⏰ ساعات إضافية اليوم</span>
+                <strong style={{ fontSize: "20px", color: "#92400e" }}>
+                  {formatOvertimeDuration(totalOvertimeMinutes)}
+                </strong>
+                <small style={{ fontSize: "10px", color: "#786558", display: "block", marginTop: "2px" }}>
+                  (تم صرف: {formatOvertimeDuration(paidOvertimeMinutes)})
+                </small>
+              </div>
+            )}
           </div>
         )}
 
@@ -6078,6 +6479,67 @@ function DailyAttendance({ session, onGoToPos }: { session: Session; onGoToPos?:
                         </strong>
                       </div>
                     )}
+
+                    {Boolean(emp.overtimeMinutes && emp.overtimeMinutes > 0) && (
+                      <div
+                        style={{
+                          marginTop: "4px",
+                          padding: "8px 10px",
+                          borderRadius: "8px",
+                          background: emp.overtimePaid ? "#f0fdf4" : "#fffbeb",
+                          border: emp.overtimePaid ? "1px solid #bbf7d0" : "1px solid #fde68a",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span style={{ fontSize: "14px" }}>⏳</span>
+                          <div>
+                            <span style={{ fontSize: "11px", color: emp.overtimePaid ? "#166534" : "#92400e", fontWeight: 700, display: "block" }}>
+                              ساعات إضافية (Overtime):
+                            </span>
+                            <strong style={{ fontSize: "12px", color: emp.overtimePaid ? "#15803d" : "#b45309" }}>
+                              +{formatOvertimeDuration(emp.overtimeMinutes)} ({emp.overtimeMinutes} دقيقة)
+                            </strong>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          {emp.overtimePaid ? (
+                            <span style={{ background: "#dcfce7", color: "#166534", padding: "3px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: 700 }}>
+                              ✓ تم التحاسب والصرف
+                            </span>
+                          ) : (
+                            <span style={{ background: "#fef2f2", color: "#b91c1c", padding: "3px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: 700 }}>
+                              ⏳ معلق (لم يُحاسب)
+                            </span>
+                          )}
+
+                          {!isEmployeeTerminal && session.role === "ADMIN" && (
+                            <button
+                              type="button"
+                              className="secondary"
+                              style={{
+                                fontSize: "11px",
+                                padding: "3px 8px",
+                                fontWeight: 700,
+                                color: emp.overtimePaid ? "#6b7280" : "#15803d",
+                                borderColor: emp.overtimePaid ? "#d1d5db" : "#86efac",
+                                background: "#fff",
+                              }}
+                              disabled={isWorking}
+                              onClick={() => void handleToggleOvertimePaid(emp)}
+                              title={emp.overtimePaid ? "إلغاء حالة المحاسبة وجعلها معلقة" : "تأكيد صرف ومحاسبة الساعات الإضافية"}
+                            >
+                              {emp.overtimePaid ? "↩️ إلغاء" : "💵 تسوية"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions Button */}
@@ -6226,6 +6688,64 @@ function CatalogPagination({ totalItems, page, onPageChange }: { totalItems: num
   </nav>;
 }
 
+function playScanBeep(success: boolean) {
+  try {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    if (success) {
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(1750, ctx.currentTime);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.08);
+    } else {
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.18);
+    }
+  } catch {}
+}
+
+function getNormalizedChar(e: KeyboardEvent): string | null {
+  if (e.key === "Enter") return null;
+  // If e.code is Digit0-9
+  if (e.code && e.code.startsWith("Digit") && e.code.length === 6) {
+    return e.code.slice(5);
+  }
+  // If e.code is Numpad0-9
+  if (e.code && e.code.startsWith("Numpad") && e.code.length === 7) {
+    return e.code.slice(6);
+  }
+  // If e.code is KeyA-Z
+  if (e.code && e.code.startsWith("Key") && e.code.length === 4) {
+    return e.code.slice(3).toUpperCase();
+  }
+  if (e.code === "Minus" || e.key === "-") return "-";
+  if (e.code === "Period" || e.key === ".") return ".";
+  if (e.code === "Slash" || e.key === "/") return "/";
+  if (e.code === "Space" || e.key === " ") return " ";
+
+  // Arabic Indic digits fallback (٠١٢٣٤٥٦٧٨٩)
+  const arabicDigits = "٠١٢٣٤٥٦٧٨٩";
+  const idx = arabicDigits.indexOf(e.key);
+  if (idx !== -1) return String(idx);
+
+  // Standard alphanumeric single character
+  if (e.key && e.key.length === 1 && /^[a-zA-Z0-9\-\.\s]$/.test(e.key)) {
+    return e.key.toUpperCase();
+  }
+  return null;
+}
+
 function Pos({ active = true, products, employees, customerChoices, session, busy, save }: { active?: boolean; products: Product[]; employees: Employee[]; customerChoices: CustomerChoice[]; session: Session; busy: boolean; save: (value: unknown, done: (invoiceNumber?: number) => void) => void }) {
   const [initialDraft] = useState<PosDraftData>(() => loadPosDraft());
   const [search, setSearch] = useState("");
@@ -6256,6 +6776,13 @@ function Pos({ active = true, products, employees, customerChoices, session, bus
   });
   const [completedInvoice, setCompletedInvoice] = useState<InvoiceDetailView | null>(null);
 
+  const processBarcodeRef = useRef<(code?: string) => boolean>(() => false);
+  const scannerBufferRef = useRef<string>("");
+  const scannerTimingRef = useRef<number[]>([]);
+  const lastKeyTimeRef = useRef<number>(0);
+  const activeInputPreScanRef = useRef<{ element: HTMLInputElement | HTMLTextAreaElement; value: string; selectionStart: number | null } | null>(null);
+  const resetTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!active) return;
     function handlePosKeyDown(e: KeyboardEvent) {
@@ -6263,22 +6790,27 @@ function Pos({ active = true, products, employees, customerChoices, session, bus
         if (selectedProduct) {
           e.preventDefault();
           setSelectedProduct(null);
+          return;
         } else if (sheetOpen) {
           e.preventDefault();
           setSheetOpen(false);
+          return;
         }
       } else if (e.key === "F2") {
         if (cart.length > 0) {
           e.preventDefault();
           setSheetOpen(true);
+          return;
         }
       } else if (e.key === "F8") {
         e.preventDefault();
         newInvoice();
+        return;
       } else if ((e.ctrlKey || e.metaKey) && (e.code === "KeyF" || e.key.toLowerCase() === "f" || e.key === "ب")) {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
+        return;
       } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         if (cart.length > 0) {
           e.preventDefault();
@@ -6288,11 +6820,102 @@ function Pos({ active = true, products, employees, customerChoices, session, bus
             const form = document.querySelector(".sheet-body form, .invoice-sheet form") as HTMLFormElement | null;
             form?.requestSubmit();
           }
+          return;
         }
       }
+
+      // Barcode Scanner Global Detection
+      const target = e.target as HTMLElement | null;
+      const isInput = Boolean(target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA"));
+      const isBarcodeField = target === searchInputRef.current || target === sheetBarcodeInputRef.current;
+
+      if (e.key === "Enter") {
+        const buffer = scannerBufferRef.current.trim();
+        const timings = scannerTimingRef.current;
+        const count = timings.length;
+        const totalDuration = count > 1 ? timings[count - 1] - timings[0] : 999;
+        const avgInterval = count > 1 ? totalDuration / (count - 1) : 999;
+        const isFastBurst = count >= 3 && avgInterval < 65;
+        const isOutsideInput = !isInput;
+
+        if (isFastBurst || (isOutsideInput && buffer.length >= 2)) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (activeInputPreScanRef.current && activeInputPreScanRef.current.element === target) {
+            const { element, value, selectionStart } = activeInputPreScanRef.current;
+            element.value = value;
+            if (selectionStart !== null) element.setSelectionRange(selectionStart, selectionStart);
+            element.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+
+          scannerBufferRef.current = "";
+          scannerTimingRef.current = [];
+          activeInputPreScanRef.current = null;
+          if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+
+          processBarcodeRef.current(buffer);
+          return;
+        }
+
+        if (isBarcodeField && buffer.length > 0) {
+          scannerBufferRef.current = "";
+          scannerTimingRef.current = [];
+          activeInputPreScanRef.current = null;
+          return;
+        }
+
+        scannerBufferRef.current = "";
+        scannerTimingRef.current = [];
+        activeInputPreScanRef.current = null;
+        return;
+      }
+
+      if (e.ctrlKey || e.altKey || e.metaKey || e.key.length > 1) {
+        return;
+      }
+
+      const char = getNormalizedChar(e);
+      if (!char) return;
+
+      const now = performance.now();
+      const diff = now - lastKeyTimeRef.current;
+      lastKeyTimeRef.current = now;
+
+      if (diff > 85) {
+        scannerBufferRef.current = char;
+        scannerTimingRef.current = [now];
+        if (isInput && !isBarcodeField) {
+          activeInputPreScanRef.current = {
+            element: target as HTMLInputElement,
+            value: (target as HTMLInputElement).value,
+            selectionStart: (target as HTMLInputElement).selectionStart,
+          };
+        } else {
+          activeInputPreScanRef.current = null;
+        }
+      } else {
+        scannerBufferRef.current += char;
+        scannerTimingRef.current.push(now);
+
+        if (isInput && !isBarcodeField && scannerTimingRef.current.length >= 2 && diff < 50) {
+          e.preventDefault();
+          if (activeInputPreScanRef.current && activeInputPreScanRef.current.element === target) {
+            (target as HTMLInputElement).value = activeInputPreScanRef.current.value;
+            (target as HTMLInputElement).dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        }
+      }
+
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = window.setTimeout(() => {
+        scannerBufferRef.current = "";
+        scannerTimingRef.current = [];
+        activeInputPreScanRef.current = null;
+      }, 300);
     }
-    window.addEventListener("keydown", handlePosKeyDown);
-    return () => window.removeEventListener("keydown", handlePosKeyDown);
+    window.addEventListener("keydown", handlePosKeyDown, true);
+    return () => window.removeEventListener("keydown", handlePosKeyDown, true);
   }, [active, selectedProduct, sheetOpen, cart.length]);
 
   const [sellerEmployeeId, setSellerEmployeeId] = useState(() => initialDraft.sellerEmployeeId || "");
@@ -6517,9 +7140,14 @@ function Pos({ active = true, products, employees, customerChoices, session, bus
     } catch {}
   }
 
-  function handleAddByBarcode() {
-    const code = sheetBarcode.trim();
-    if (!code) return;
+  function processBarcode(rawCode?: string): boolean {
+    let code = (rawCode !== undefined ? rawCode : sheetBarcode).trim();
+    if (!code) return false;
+
+    // Handle Code 39 leading/trailing asterisks if transmitted by scanner
+    if (code.length > 2 && code.startsWith("*") && code.endsWith("*")) {
+      code = code.slice(1, -1).trim();
+    }
 
     // 1. Check exact variant barcode match (in stock)
     const exactVariant = products.find(
@@ -6528,13 +7156,14 @@ function Pos({ active = true, products, employees, customerChoices, session, bus
     if (exactVariant) {
       add(exactVariant);
       setSheetBarcode("");
+      setSearch("");
+      playScanBeep(true);
       setSheetBarcodeFeedback({
         type: "success",
         text: `تمت إضافة: "${exactVariant.name}" ${exactVariant.color || exactVariant.size ? `(${[exactVariant.color, exactVariant.size].filter(Boolean).join(" / ")})` : ""}`,
       });
-      setTimeout(() => setSheetBarcodeFeedback(null), 3000);
-      sheetBarcodeInputRef.current?.focus();
-      return;
+      setTimeout(() => setSheetBarcodeFeedback(null), 3500);
+      return true;
     }
 
     // 2. Check grouped product barcode match
@@ -6546,43 +7175,90 @@ function Pos({ active = true, products, employees, customerChoices, session, bus
       if (available.length === 1) {
         add(available[0]);
         setSheetBarcode("");
+        setSearch("");
+        playScanBeep(true);
         setSheetBarcodeFeedback({ type: "success", text: `تمت إضافة: "${available[0].name}"` });
-        setTimeout(() => setSheetBarcodeFeedback(null), 3000);
-        sheetBarcodeInputRef.current?.focus();
-        return;
+        setTimeout(() => setSheetBarcodeFeedback(null), 3500);
+        return true;
       } else if (available.length > 1) {
         setSelectedProduct(exactGroup);
         setSheetBarcode("");
+        setSearch("");
+        playScanBeep(true);
         setSheetBarcodeFeedback(null);
-        return;
+        return true;
       } else {
+        playScanBeep(false);
         setSheetBarcodeFeedback({ type: "error", text: `المنتج "${exactGroup.name}" نفد من المخزن بالكامل` });
-        return;
+        setTimeout(() => setSheetBarcodeFeedback(null), 4000);
+        return false;
       }
     }
 
-    // 3. Out of stock check
+    // 3. Fallback: Match by Product ID (e.g. if code is P1002 or 1002 from generated stickers)
+    const pidMatch = code.match(/^[pP]?(\d+)$/);
+    if (pidMatch) {
+      const pid = parseInt(pidMatch[1], 10);
+      const exactVariantById = products.find((p) => p.productId === pid && p.quantity > 0);
+      if (exactVariantById) {
+        const groupById = groupedProducts.find((g) => g.productId === pid);
+        if (groupById) {
+          const avail = groupById.rows.filter((r) => r.quantity > 0);
+          if (avail.length === 1) {
+            add(avail[0]);
+            setSheetBarcode("");
+            setSearch("");
+            playScanBeep(true);
+            setSheetBarcodeFeedback({ type: "success", text: `تمت إضافة: "${avail[0].name}"` });
+            setTimeout(() => setSheetBarcodeFeedback(null), 3500);
+            return true;
+          } else if (avail.length > 1) {
+            setSelectedProduct(groupById);
+            setSheetBarcode("");
+            setSearch("");
+            playScanBeep(true);
+            setSheetBarcodeFeedback(null);
+            return true;
+          }
+        }
+      }
+    }
+
+    // 4. Out of stock check
     const outOfStock = products.find(
       (p) => p.barcode && p.barcode.trim().toLowerCase() === code.toLowerCase()
     );
     if (outOfStock) {
+      playScanBeep(false);
       setSheetBarcodeFeedback({ type: "error", text: `المنتج "${outOfStock.name}" غير متوفر حالياً (الكمية 0)` });
-      return;
+      setTimeout(() => setSheetBarcodeFeedback(null), 4000);
+      return false;
     }
 
-    // 4. Exact name match fallback (if typed by product name)
+    // 5. Exact name match fallback (if typed by product name)
     const nameMatches = groupedProducts.filter(
       (product) => product.name.trim().toLowerCase() === code.toLowerCase()
     );
     if (nameMatches.length === 1) {
       chooseProduct(nameMatches[0]);
       setSheetBarcode("");
+      setSearch("");
+      playScanBeep(true);
       setSheetBarcodeFeedback(null);
-      return;
+      return true;
     }
 
-    // 5. Not found
+    // 6. Not found
+    playScanBeep(false);
     setSheetBarcodeFeedback({ type: "error", text: `لم يتم العثور على أي منتج بالباركود: ${code}` });
+    setTimeout(() => setSheetBarcodeFeedback(null), 4000);
+    return false;
+  }
+
+  processBarcodeRef.current = processBarcode;
+
+  function handleAddByBarcode() {
+    processBarcode();
   }
 
   function newInvoice() {
@@ -6644,10 +7320,15 @@ function Pos({ active = true, products, employees, customerChoices, session, bus
         </div>
       </div>
       <div className="catalog-toolbar">
+        {sheetBarcodeFeedback && !sheetOpen && (
+          <div className={`sheet-barcode-feedback ${sheetBarcodeFeedback.type}`} style={{ width: "100%", margin: "0 0 10px" }}>
+            {sheetBarcodeFeedback.text}
+          </div>
+        )}
         <input
           ref={searchInputRef}
           className="search full"
-          placeholder="ابحث بالاسم أو امسح الباركود… (Ctrl + F)"
+          placeholder="ابحث بالاسم أو امسح الباركود بالسكنر من أي مكان… (Ctrl + F)"
           value={search}
           onChange={(event) => {
             const raw = event.target.value;
@@ -6656,14 +7337,15 @@ function Pos({ active = true, products, employees, customerChoices, session, bus
             const val = raw.trim();
             if (val) {
               const exactVariant = products.find(
-                (p) => p.barcode && p.barcode.trim() === val && p.quantity > 0
+                (p) => p.barcode && p.barcode.trim().toLowerCase() === val.toLowerCase() && p.quantity > 0
               );
               if (exactVariant) {
                 add(exactVariant);
+                playScanBeep(true);
                 return;
               }
               const exactGroup = groupedProducts.find(
-                (product) => product.barcode && product.barcode.trim() === val
+                (product) => product.barcode && product.barcode.trim().toLowerCase() === val.toLowerCase()
               );
               if (exactGroup) {
                 chooseProduct(exactGroup);
@@ -6674,24 +7356,11 @@ function Pos({ active = true, products, employees, customerChoices, session, bus
             if (event.key === "Enter") {
               const val = search.trim();
               if (!val) return;
-              const exactVariant = products.find(
-                (p) => p.barcode && p.barcode.trim() === val && p.quantity > 0
-              );
-              if (exactVariant) {
-                event.preventDefault();
-                add(exactVariant);
-                return;
-              }
-              const exactGroup = groupedProducts.find(
-                (product) => product.barcode && product.barcode.trim() === val
-              );
-              if (exactGroup) {
-                event.preventDefault();
-                chooseProduct(exactGroup);
+              event.preventDefault();
+              if (processBarcode(val)) {
                 return;
               }
               if (filtered.length === 1) {
-                event.preventDefault();
                 chooseProduct(filtered[0]);
               }
             }
@@ -6844,7 +7513,7 @@ function Pos({ active = true, products, employees, customerChoices, session, bus
                         handleAddByBarcode();
                       }
                     }}
-                    placeholder="امسح الباركود بجهاز الاسكانر أو اكتبه يدوياً واضغط Enter…"
+                    placeholder="امسح الباركود بالسكنر من أي مكان أو اكتبه هنا واضغط Enter…"
                     aria-label="إضافة منتج بالباركود داخل الفاتورة"
                   />
                   {sheetBarcode && (
@@ -11063,18 +11732,46 @@ function generateBarcodeBits(code: string): string {
   for (let i = 0; i < str.length; i++) {
     bits += (patterns[str[i]] || patterns['0']) + "0";
   }
-  return bits;
+  // Quiet zones at both ends (10 modules each) required by optical barcode scanners
+  return "0000000000" + bits + "0000000000";
 }
 
-function BarcodeSVG({ code, width = 160, height = 35 }: { code: string; width?: number; height?: number }) {
+function BarcodeSVG({ code, width = 125, height = 34 }: { code: string; width?: number; height?: number }) {
   const bits = generateBarcodeBits(code);
   const barWidth = width / bits.length;
+
+  const bars: { x: number; width: number }[] = [];
+  let startIdx: number | null = null;
+  for (let i = 0; i < bits.length; i++) {
+    if (bits[i] === "1") {
+      if (startIdx === null) startIdx = i;
+    } else if (startIdx !== null) {
+      bars.push({ x: startIdx * barWidth, width: (i - startIdx) * barWidth });
+      startIdx = null;
+    }
+  }
+  if (startIdx !== null) {
+    bars.push({ x: startIdx * barWidth, width: (bits.length - startIdx) * barWidth });
+  }
+
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: "block", margin: "0 auto" }}>
-      {bits.split("").map((bit, idx) => (
-        bit === "1" ? (
-          <rect key={idx} x={idx * barWidth} y={0} width={Math.max(1, barWidth)} height={height} fill="#000" />
-        ) : null
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      shapeRendering="crispEdges"
+      style={{ display: "block", margin: "0 auto", shapeRendering: "crispEdges" }}
+    >
+      <rect x={0} y={0} width={width} height={height} fill="#fff" />
+      {bars.map((bar, idx) => (
+        <rect
+          key={idx}
+          x={bar.x}
+          y={0}
+          width={bar.width}
+          height={height}
+          fill="#000"
+        />
       ))}
     </svg>
   );
@@ -11132,6 +11829,15 @@ async function printDocumentFromPage(key: string, title: string): Promise<void> 
   }
 }
 
+function isLikelyBarcodePrinter(name: string): boolean {
+  return /barcode|label|365|235|420|470|tsc|zebra|postek|argox/i.test(name);
+}
+
+function isLikelyReceiptPrinter(name: string): boolean {
+  if (isLikelyBarcodePrinter(name)) return false;
+  return /receipt|pos|80|58|thermal|t20|t88|d200|n160|q90|epson|bixolon|star|rongta/i.test(name);
+}
+
 function ThermalReceiptModal({
   invoiceDetail,
   onClose,
@@ -11143,30 +11849,77 @@ function ThermalReceiptModal({
 }) {
   const [paperSize, setPaperSize] = useState<"80mm" | "58mm">("80mm");
   const receiptRef = useRef<HTMLDivElement>(null);
-  const [drawerPrinter, setDrawerPrinter] = useState(() => localStorage.getItem("morsi.drawerPrinter") || "");
+  const [receiptPrinter, setReceiptPrinter] = useState(() => localStorage.getItem("morsi.receiptPrinter") || localStorage.getItem("morsi.drawerPrinter") || "");
   const [printerNames, setPrinterNames] = useState<string[]>([]);
   const [drawerPin, setDrawerPin] = useState<0 | 1>(() => localStorage.getItem("morsi.drawerPin") === "1" ? 1 : 0);
   const [autoOpenDrawer, setAutoOpenDrawer] = useState(() => localStorage.getItem("morsi.autoOpenDrawer") !== "false");
   const [drawerNotice, setDrawerNotice] = useState("");
 
+  const changeReceiptPrinter = useCallback((name: string) => {
+    setReceiptPrinter(name);
+    localStorage.setItem("morsi.receiptPrinter", name);
+    localStorage.setItem("morsi.drawerPrinter", name);
+    if (isTauri() && name.trim()) {
+      void invoke("set_default_receipt_printer", { printerName: name.trim() }).catch(() => {});
+    }
+  }, []);
+
   useEffect(() => {
+    if (!isTauri()) return;
     void Promise.all([
-      invoke<string>("get_default_receipt_printer").catch(() => ""),
-      invoke<string[]>("list_receipt_printers").catch(() => []),
+      invoke<string>("get_default_receipt_printer").catch((): string => ""),
+      invoke<string[]>("list_receipt_printers").catch((): string[] => []),
     ]).then(([defaultPrinter, installedPrinters]) => {
       setPrinterNames(installedPrinters);
-      setDrawerPrinter((current) => current || installedPrinters.find((name) => /xprinter|xp-d200n/i.test(name)) || defaultPrinter);
+
+      setReceiptPrinter((current) => {
+        // 1. If currently set and valid in installedPrinters, keep it
+        if (current && installedPrinters.includes(current)) {
+          void invoke("set_default_receipt_printer", { printerName: current }).catch(() => {});
+          return current;
+        }
+        // 2. If saved in localStorage and valid
+        const saved = localStorage.getItem("morsi.receiptPrinter") || localStorage.getItem("morsi.drawerPrinter");
+        if (saved && installedPrinters.includes(saved)) {
+          void invoke("set_default_receipt_printer", { printerName: saved }).catch(() => {});
+          return saved;
+        }
+        // 3. Find printer matching receipt signatures (and definitely NOT barcode)
+        const bestReceipt = installedPrinters.find(isLikelyReceiptPrinter);
+        if (bestReceipt) {
+          localStorage.setItem("morsi.receiptPrinter", bestReceipt);
+          localStorage.setItem("morsi.drawerPrinter", bestReceipt);
+          void invoke("set_default_receipt_printer", { printerName: bestReceipt }).catch(() => {});
+          return bestReceipt;
+        }
+        // 4. Default printer if it's not a barcode printer
+        if (defaultPrinter && !isLikelyBarcodePrinter(defaultPrinter)) {
+          localStorage.setItem("morsi.receiptPrinter", defaultPrinter);
+          localStorage.setItem("morsi.drawerPrinter", defaultPrinter);
+          void invoke("set_default_receipt_printer", { printerName: defaultPrinter }).catch(() => {});
+          return defaultPrinter;
+        }
+        // 5. Any installed printer that is not barcode
+        const nonBarcode = installedPrinters.find((name) => !isLikelyBarcodePrinter(name));
+        const chosen = nonBarcode || defaultPrinter || installedPrinters[0] || "";
+        if (chosen) {
+          localStorage.setItem("morsi.receiptPrinter", chosen);
+          localStorage.setItem("morsi.drawerPrinter", chosen);
+          void invoke("set_default_receipt_printer", { printerName: chosen }).catch(() => {});
+        }
+        return chosen;
+      });
     });
   }, []);
 
   const openDrawer = useCallback(async () => {
     try {
-      await invoke("pulse_cash_drawer", { printerName: drawerPrinter.trim(), pin: drawerPin });
+      await invoke("pulse_cash_drawer", { printerName: receiptPrinter.trim(), pin: drawerPin });
       setDrawerNotice("تم إرسال أمر فتح الدرج للطابعة");
     } catch (error) {
       setDrawerNotice(`تعذر فتح الدرج: ${String(error)}`);
     }
-  }, [drawerPrinter, drawerPin]);
+  }, [receiptPrinter, drawerPin]);
 
   const [printingDirect, setPrintingDirect] = useState(false);
 
@@ -11174,14 +11927,17 @@ function ThermalReceiptModal({
     if (!receiptRef.current) return;
     try {
       setDrawerNotice("");
+      if (isTauri() && receiptPrinter.trim()) {
+        await invoke("set_default_receipt_printer", { printerName: receiptPrinter.trim() }).catch(() => {});
+      }
       await printReceiptHtml(receiptRef.current, paperSize);
-      if (autoOpenDrawer && isTauri() && drawerPrinter.trim()) {
+      if (autoOpenDrawer && isTauri() && receiptPrinter.trim()) {
         void openDrawer();
       }
     } catch (error) {
       setDrawerNotice(`تعذرت معاينة/طباعة الفاتورة: ${String(error)}`);
     }
-  }, [paperSize, autoOpenDrawer, drawerPrinter, openDrawer]);
+  }, [paperSize, autoOpenDrawer, receiptPrinter, openDrawer]);
 
   const printReceiptDirect = useCallback(async () => {
     if (!receiptRef.current) return;
@@ -11195,7 +11951,7 @@ function ThermalReceiptModal({
     try {
       await document.fonts.ready;
       await receiptRef.current.querySelector("img")?.decode().catch(() => undefined);
-      const printerName = drawerPrinter.trim() || await invoke<string>("get_default_receipt_printer");
+      const printerName = receiptPrinter.trim() || await invoke<string>("get_default_receipt_printer");
       const targetWidth = paperSize === "80mm" ? 560 : 368;
       const receipt = await thermalCanvas(receiptRef.current, targetWidth);
       await invoke("print_thermal_bitmap", {
@@ -11218,7 +11974,7 @@ function ThermalReceiptModal({
     } finally {
       setPrintingDirect(false);
     }
-  }, [paperSize, drawerPrinter, drawerPin, autoOpenDrawer, printReceiptPreview]);
+  }, [paperSize, receiptPrinter, drawerPin, autoOpenDrawer, printReceiptPreview]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -11251,23 +12007,57 @@ function ThermalReceiptModal({
     >
       <div className="thermal-receipt-dialog">
         {/* On-Screen Controls Toolbar */}
-        <div className="thermal-receipt-controls print-hide">
-          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-            <span style={{ fontSize: "12px", color: "#dfcfc0" }}>عرض الورق:</span>
-            <button
-              type="button"
-              className={`thermal-size-btn ${paperSize === "80mm" ? "active" : ""}`}
-              onClick={() => setPaperSize("80mm")}
-            >
-              80mm (الافتراضي)
-            </button>
-            <button
-              type="button"
-              className={`thermal-size-btn ${paperSize === "58mm" ? "active" : ""}`}
-              onClick={() => setPaperSize("58mm")}
-            >
-              58mm (ورق رفيع)
-            </button>
+        <div className="thermal-receipt-controls print-hide" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+          <div style={{ display: "flex", gap: "14px", alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: "#dfcfc0" }}>عرض الورق:</span>
+              <button
+                type="button"
+                className={`thermal-size-btn ${paperSize === "80mm" ? "active" : ""}`}
+                onClick={() => setPaperSize("80mm")}
+              >
+                80mm (الافتراضي)
+              </button>
+              <button
+                type="button"
+                className={`thermal-size-btn ${paperSize === "58mm" ? "active" : ""}`}
+                onClick={() => setPaperSize("58mm")}
+              >
+                58mm (ورق رفيع)
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: "#dfcfc0", fontWeight: 700 }}>🖨️ طابعة الفواتير:</span>
+              <select
+                aria-label="طابعة الفواتير والكاشير"
+                value={receiptPrinter}
+                onChange={(e) => changeReceiptPrinter(e.target.value)}
+                style={{
+                  padding: "5px 10px",
+                  fontSize: "12.5px",
+                  borderRadius: "6px",
+                  background: "#2a1c17",
+                  color: "#f5ece3",
+                  border: "1px solid #8c6a53",
+                  fontWeight: "bold",
+                  minWidth: "170px",
+                  cursor: "pointer",
+                }}
+              >
+                {printerNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+                {receiptPrinter && !printerNames.includes(receiptPrinter) && (
+                  <option value={receiptPrinter}>{receiptPrinter}</option>
+                )}
+                {!printerNames.length && !receiptPrinter && (
+                  <option value="">(لم يتم العثور على طابعات)</option>
+                )}
+              </select>
+            </div>
           </div>
 
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
@@ -11285,7 +12075,7 @@ function ThermalReceiptModal({
               }}
               onClick={() => void printReceiptDirect()}
               disabled={printingDirect}
-              title="طباعة حرارية مباشرة وسريعة (Enter)"
+              title="طباعة حرارية مباشرة وسريعة على طابعة الفواتير (Enter)"
             >
               <LuPrinter /> {printingDirect ? "جارٍ الطباعة..." : "طباعة سريعة (Enter)"}
             </button>
@@ -11324,21 +12114,11 @@ function ThermalReceiptModal({
                 localStorage.setItem("morsi.autoOpenDrawer", String(event.target.checked));
               }}
             />
-            فتح الدرج بعد طباعة الفاتورة
+            فتح درج الكاشير بعد طباعة الفاتورة
           </label>
-          <input
-            aria-label="اسم طابعة الدرج في ويندوز"
-            list="receipt-printer-names"
-            placeholder="اسم طابعة Xprinter في ويندوز"
-            value={drawerPrinter}
-            onChange={(event) => {
-              setDrawerPrinter(event.target.value);
-              localStorage.setItem("morsi.drawerPrinter", event.target.value);
-            }}
-          />
-          <datalist id="receipt-printer-names">
-            {printerNames.map((name) => <option key={name} value={name} />)}
-          </datalist>
+          <span style={{ fontSize: "12px", color: "#666" }}>
+            (عبر طابعة: <strong>{receiptPrinter || "الافتراضية"}</strong>)
+          </span>
           <select
             aria-label="منفذ الدرج"
             value={drawerPin}
@@ -11351,7 +12131,7 @@ function ThermalReceiptModal({
             <option value={0}>منفذ 2</option>
             <option value={1}>منفذ 5</option>
           </select>
-          <button type="button" className="secondary" onClick={() => void openDrawer()} disabled={!drawerPrinter.trim()}>
+          <button type="button" className="secondary" onClick={() => void openDrawer()} disabled={!receiptPrinter.trim()}>
             تجربة فتح الدرج
           </button>
           {drawerNotice && <small role="status">{drawerNotice}</small>}
@@ -11368,6 +12148,16 @@ function ThermalReceiptModal({
             />
             <div className="thermal-receipt-title">MORSI FOR BELT</div>
             <div className="thermal-receipt-address">طنطا - شارع القنطرة</div>
+            <div className="thermal-receipt-contacts">
+              <div className="thermal-receipt-contacts-row">
+                <span>لطلبات الأونلاين:</span>
+                <strong dir="ltr">01284888405</strong>
+              </div>
+              <div className="thermal-receipt-contacts-row">
+                <span>رقم الشكاوى والمقترحات:</span>
+                <strong dir="ltr">01270202539</strong>
+              </div>
+            </div>
           </div>
 
           <div className="thermal-receipt-divider-double" />
@@ -11688,27 +12478,14 @@ function BarcodePrintPage({
   };
 
   const handleGroupQtyChange = (group: ProductGroup, rawVal: string) => {
-    const available = group.totalQuantity;
     let num = parseInt(rawVal, 10);
     if (isNaN(num) || num < 0) num = 0;
-
-    if (num > available) {
-      num = available;
-      setWarningMsg(`عفواً! لا يمكن طلب أكثر من إجمالي الكمية المتاحة في المخزن (${available} قطعة) للمنتج "${group.name}"`);
-      setTimeout(() => setWarningMsg(null), 4500);
-    }
-
     setQtyInputMap((prev) => ({ ...prev, [group.productId]: num }));
   };
 
   const addVariantToQueue = (group: ProductGroup, variant: Product, requestedQty: number) => {
     if (requestedQty <= 0) {
       setWarningMsg("يرجى تحديد عدد ملصقات أكبر من 0 للطباعة");
-      setTimeout(() => setWarningMsg(null), 3000);
-      return;
-    }
-    if (requestedQty > variant.quantity) {
-      setWarningMsg(`لا يمكن الطباعة! الكمية المتاحة لهذا المتغير ${variant.quantity} قطعة فقط.`);
       setTimeout(() => setWarningMsg(null), 3000);
       return;
     }
@@ -11725,9 +12502,9 @@ function BarcodePrintPage({
   };
 
   const addAllVariantsOfGroup = (group: ProductGroup) => {
-    const variantsToAdd = group.rows.filter((v) => v.quantity > 0);
+    const variantsToAdd = group.rows;
     if (!variantsToAdd.length) {
-      setWarningMsg(`لا توجد كميات متاحة في المخزن لمتغيرات المنتج "${group.name}"`);
+      setWarningMsg(`لا توجد عناصر للمنتج "${group.name}"`);
       setTimeout(() => setWarningMsg(null), 3000);
       return;
     }
@@ -11735,8 +12512,10 @@ function BarcodePrintPage({
       const next = [...prev];
       for (const variant of variantsToAdd) {
         const vKey = `${group.productId}_${variant.variantId ?? "main"}`;
-        const vQty = variantQtyMap[vKey] !== undefined ? variantQtyMap[vKey] : variant.quantity;
-        const item = makeItem(group, variant, vQty > 0 ? vQty : variant.quantity);
+        const defaultQty = variant.quantity > 0 ? variant.quantity : 1;
+        const vQty = variantQtyMap[vKey] !== undefined ? variantQtyMap[vKey] : defaultQty;
+        const finalQty = vQty > 0 ? vQty : defaultQty;
+        const item = makeItem(group, variant, finalQty);
         const idx = next.findIndex((p) => p.key === item.key);
         if (idx >= 0) {
           next[idx] = item;
@@ -11753,14 +12532,10 @@ function BarcodePrintPage({
       addAllVariantsOfGroup(group);
       return;
     }
-    const requestedQty = qtyInputMap[group.productId] !== undefined ? qtyInputMap[group.productId] : (group.totalQuantity > 0 ? 1 : 0);
+    const defaultQty = group.totalQuantity > 0 ? group.totalQuantity : 1;
+    const requestedQty = qtyInputMap[group.productId] !== undefined ? qtyInputMap[group.productId] : defaultQty;
     if (requestedQty <= 0) {
       setWarningMsg("يرجى تحديد عدد ملصقات أكبر من 0 للطباعة");
-      setTimeout(() => setWarningMsg(null), 3000);
-      return;
-    }
-    if (requestedQty > group.totalQuantity) {
-      setWarningMsg(`لا يمكن الطباعة! إجمالي الكمية المتاحة ${group.totalQuantity} قطعة فقط.`);
       setTimeout(() => setWarningMsg(null), 3000);
       return;
     }
@@ -11793,18 +12568,24 @@ function BarcodePrintPage({
 
   const directPrintGroup = (group: ProductGroup) => {
     if (group.rows.length > 1) {
-      const variantsToAdd = group.rows.filter((v) => v.quantity > 0);
+      const variantsToAdd = group.rows;
       if (!variantsToAdd.length) {
-        setWarningMsg(`لا توجد كميات متاحة في المخزن لمتغيرات المنتج "${group.name}"`);
+        setWarningMsg(`لا توجد عناصر للمنتج "${group.name}"`);
         setTimeout(() => setWarningMsg(null), 3000);
         return;
       }
-      const items = variantsToAdd.map((v) => makeItem(group, v, 1));
+      const items = variantsToAdd.map((v) => {
+        const vKey = `${group.productId}_${v.variantId ?? "main"}`;
+        const defaultQty = v.quantity > 0 ? v.quantity : 1;
+        const vQty = variantQtyMap[vKey] !== undefined ? variantQtyMap[vKey] : defaultQty;
+        return makeItem(group, v, vQty > 0 ? vQty : defaultQty);
+      });
       setPrintQueue(items);
       setIsPreviewOpen(true);
       return;
     }
-    const requestedQty = qtyInputMap[group.productId] !== undefined ? qtyInputMap[group.productId] : (group.totalQuantity > 0 ? 1 : 0);
+    const defaultQty = group.totalQuantity > 0 ? group.totalQuantity : 1;
+    const requestedQty = qtyInputMap[group.productId] !== undefined ? qtyInputMap[group.productId] : defaultQty;
     if (requestedQty <= 0) {
       setWarningMsg("يرجى تحديد عدد ملصقات أكبر من 0 للطباعة");
       setTimeout(() => setWarningMsg(null), 3000);
@@ -11893,7 +12674,8 @@ function BarcodePrintPage({
                 const available = group.totalQuantity;
                 const hasMultipleVariants = group.rows.length > 1;
                 const isExpanded = expandedProductIds.has(group.productId);
-                const currentQtyInput = qtyInputMap[group.productId] !== undefined ? qtyInputMap[group.productId] : (available > 0 ? 1 : 0);
+                const defaultQty = available > 0 ? available : 1;
+                const currentQtyInput = qtyInputMap[group.productId] !== undefined ? qtyInputMap[group.productId] : defaultQty;
                 const isParentInQueue = printQueue.some((item) => item.productId === group.productId);
                 const variantsSummary = [
                   group.colors.length ? `الألوان: ${group.colors.join("، ")}` : "",
@@ -11902,7 +12684,7 @@ function BarcodePrintPage({
 
                 return (
                   <Fragment key={group.productId}>
-                    <tr style={available === 0 ? { opacity: 0.5, background: "#f9f9f9" } : {}}>
+                    <tr style={available === 0 ? { opacity: 0.85, background: "#fbfaf8" } : {}}>
                       <td>
                         <strong style={{ fontSize: "14px" }}>{group.name}</strong>
                       </td>
@@ -11941,11 +12723,9 @@ function BarcodePrintPage({
                       <td>
                         <input
                           type="number"
-                          min={0}
-                          max={available}
-                          disabled={available === 0}
+                          min={1}
                           value={currentQtyInput || ""}
-                          placeholder="0"
+                          placeholder="1"
                           onChange={(e) => handleGroupQtyChange(group, e.target.value)}
                           style={{
                             width: "80px",
@@ -11954,7 +12734,7 @@ function BarcodePrintPage({
                             fontWeight: "bold",
                             fontSize: "14px",
                             borderRadius: "6px",
-                            border: currentQtyInput > available ? "2px solid #b94d3f" : "1px solid #d0c2b4",
+                            border: "1px solid #d0c2b4",
                           }}
                         />
                       </td>
@@ -11963,17 +12743,15 @@ function BarcodePrintPage({
                           <button
                             type="button"
                             className={isParentInQueue ? "secondary" : "primary"}
-                            disabled={available === 0}
                             onClick={() => addGroupToQueue(group)}
                             style={{ fontSize: "12px", padding: "6px 10px" }}
-                            title={hasMultipleVariants ? "إضافة جميع المتغيرات المتاحة لهذا المنتج" : "إضافة هذا المنتج لطابور الطباعة"}
+                            title={hasMultipleVariants ? "إضافة جميع المتغيرات لهذا المنتج" : "إضافة هذا المنتج لطابور الطباعة"}
                           >
                             {hasMultipleVariants ? (isParentInQueue ? "تحديث الكل 🔄" : "+ كل المتغيرات") : (isParentInQueue ? "تحديث 🔄" : "+ للطابور")}
                           </button>
                           <button
                             type="button"
                             className="secondary"
-                            disabled={available === 0}
                             onClick={() => directPrintGroup(group)}
                             style={{ fontSize: "12px", padding: "6px 10px", borderColor: "#785038", color: "#785038" }}
                             title="طباعة فورية"
@@ -12003,14 +12781,15 @@ function BarcodePrintPage({
                               style={{ fontSize: "12px", padding: "5px 12px", borderColor: "#24742c", color: "#24742c", fontWeight: 700 }}
                               onClick={() => addAllVariantsOfGroup(group)}
                             >
-                              + إضافة جميع المتغيرات المتاحة للطابور
+                              + إضافة جميع المتغيرات للطابور
                             </button>
                           </div>
 
                           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "10px" }}>
                             {group.rows.map((variant, vIdx) => {
                               const vKey = `${group.productId}_${variant.variantId ?? vIdx}`;
-                              const vQty = variantQtyMap[vKey] !== undefined ? variantQtyMap[vKey] : (variant.quantity > 0 ? 1 : 0);
+                              const defaultVQty = variant.quantity > 0 ? variant.quantity : 1;
+                              const vQty = variantQtyMap[vKey] !== undefined ? variantQtyMap[vKey] : defaultVQty;
                               const isQueued = printQueue.some((item) => item.key === vKey);
 
                               return (
@@ -12045,15 +12824,12 @@ function BarcodePrintPage({
                                   <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "4px" }}>
                                     <input
                                       type="number"
-                                      min={0}
-                                      max={variant.quantity}
+                                      min={1}
                                       value={vQty || ""}
-                                      placeholder="0"
-                                      disabled={variant.quantity === 0}
+                                      placeholder="1"
                                       onChange={(e) => {
                                         let val = parseInt(e.target.value, 10);
                                         if (isNaN(val) || val < 0) val = 0;
-                                        if (val > variant.quantity) val = variant.quantity;
                                         setVariantQtyMap((prev) => ({ ...prev, [vKey]: val }));
                                       }}
                                       style={{ width: "65px", padding: "4px 6px", textAlign: "center", fontWeight: "bold", fontSize: "13px" }}
@@ -12062,7 +12838,7 @@ function BarcodePrintPage({
                                       type="button"
                                       className={isQueued ? "secondary" : "primary"}
                                       style={{ flex: 1, fontSize: "11px", padding: "5px 8px" }}
-                                      disabled={variant.quantity === 0 || vQty === 0}
+                                      disabled={vQty <= 0}
                                       onClick={() => addVariantToQueue(group, variant, vQty)}
                                     >
                                       {isQueued ? "تحديث 🔄" : "+ للطابور"}
@@ -12071,7 +12847,7 @@ function BarcodePrintPage({
                                       type="button"
                                       className="secondary"
                                       style={{ fontSize: "11px", padding: "5px 8px", borderColor: "#785038", color: "#785038" }}
-                                      disabled={variant.quantity === 0 || vQty === 0}
+                                      disabled={vQty <= 0}
                                       onClick={() => directPrintVariant(group, variant, vQty)}
                                       title="طباعة فورية لهذا المقاس/اللون"
                                     >
@@ -12143,7 +12919,25 @@ function BarcodePrintPage({
                     <td>{item.location ? `📍 ${item.location}` : "—"}</td>
                     <td><code>{item.barcode}</code></td>
                     <td><strong>{money(item.sellPricePiasters)}</strong></td>
-                    <td><strong style={{ color: "#24742c", fontSize: "16px" }}>{item.qty} ملصق</strong></td>
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <input
+                          type="number"
+                          min={1}
+                          value={item.qty}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!isNaN(val) && val > 0) {
+                              setPrintQueue((prev) =>
+                                prev.map((p) => (p.key === item.key ? { ...p, qty: val } : p))
+                              );
+                            }
+                          }}
+                          style={{ width: "70px", padding: "4px 8px", textAlign: "center", fontWeight: "bold", fontSize: "14px" }}
+                        />
+                        <span style={{ fontSize: "13px", color: "#5d3a28" }}>ملصق</span>
+                      </div>
+                    </td>
                     <td>
                       <button
                         type="button"
@@ -12190,13 +12984,33 @@ function PreviewBarcodeModal({
   useEffect(() => {
     if (!isTauri()) return;
     void Promise.all([
-      invoke<string>("get_default_receipt_printer").catch(() => ""),
-      invoke<string[]>("list_receipt_printers").catch(() => []),
+      invoke<string>("get_default_receipt_printer").catch((): string => ""),
+      invoke<string[]>("list_receipt_printers").catch((): string[] => []),
     ]).then(([defaultPrinter, installedPrinters]) => {
       setPrinterNames(installedPrinters);
-      setBarcodePrinter((current) => current || installedPrinters.find((name) => /xprinter|xp-d200n/i.test(name)) || defaultPrinter);
+      setBarcodePrinter((current) => {
+        if (current && installedPrinters.includes(current)) return current;
+        const saved = localStorage.getItem("morsi.barcodePrinter");
+        if (saved && installedPrinters.includes(saved)) return saved;
+        const bestBarcode = installedPrinters.find(isLikelyBarcodePrinter);
+        if (bestBarcode) {
+          localStorage.setItem("morsi.barcodePrinter", bestBarcode);
+          return bestBarcode;
+        }
+        return defaultPrinter || installedPrinters[0] || "";
+      });
     });
   }, []);
+
+  const handleClose = () => {
+    if (isTauri()) {
+      const rec = localStorage.getItem("morsi.receiptPrinter") || localStorage.getItem("morsi.drawerPrinter") || "";
+      if (rec.trim()) {
+        void invoke("set_default_receipt_printer", { printerName: rec.trim() }).catch(() => {});
+      }
+    }
+    onClose();
+  };
 
   const [showName, setShowName] = useState(true);
   const [showVariantInfo, setShowVariantInfo] = useState(true);
@@ -12224,6 +13038,9 @@ function PreviewBarcodeModal({
     if (!labelsRef.current) return;
     try {
       setPrintNotice("");
+      if (isTauri() && barcodePrinter.trim()) {
+        await invoke("set_default_receipt_printer", { printerName: barcodePrinter.trim() }).catch(() => {});
+      }
       await printBarcodeStickersHtml(labelsRef.current, labelSize);
     } catch (error) {
       setPrintNotice(`تعذرت معاينة/طباعة الملصقات: ${String(error)}`);
@@ -12246,29 +13063,42 @@ function PreviewBarcodeModal({
       const paperW = labelSize === "compact" ? 40 : labelSize === "standard" ? 50 : 60;
       const paperH = labelSize === "compact" ? 25 : labelSize === "standard" ? 30 : 40;
 
-      for (let offset = 0; offset < labels.length; offset += 20) {
-        const batch = labels.slice(offset, offset + 20);
-        const page = document.createElement("canvas");
-        page.width = 576;
-        page.height = batch.length * labelHeight;
-        const context = page.getContext("2d");
-        if (!context) throw new Error("تعذر تجهيز ملصقات الطباعة");
-        context.fillStyle = "#fff";
-        context.fillRect(0, 0, page.width, page.height);
-        for (let index = 0; index < batch.length; index++) {
-          const label = await thermalCanvas(batch[index], labelWidth, labelHeight);
-          context.drawImage(label, Math.floor((page.width - labelWidth) / 2), index * labelHeight);
+      // Fast caching by sticker signature to avoid re-rendering identical stickers multiple times
+      const pixelCache = new Map<string, { widthBytes: number; height: number; pixels: number[] }>();
+      const labelsData: Array<{ widthBytes: number; height: number; pixels: number[] }> = [];
+
+      for (let index = 0; index < stickersToPrint.length; index++) {
+        const item = stickersToPrint[index];
+        const cacheKey = `${item.key}_${labelSize}_${showName}_${showVariantInfo}_${showLocation}_${showPrice}`;
+        let cached = pixelCache.get(cacheKey);
+        if (!cached) {
+          const domCard = labels[index];
+          if (domCard) {
+            const page = document.createElement("canvas");
+            page.width = 576;
+            page.height = labelHeight;
+            const context = page.getContext("2d");
+            if (!context) throw new Error("تعذر تجهيز ملصقات الطباعة");
+            context.fillStyle = "#fff";
+            context.fillRect(0, 0, page.width, page.height);
+            const label = await thermalCanvas(domCard, labelWidth, labelHeight);
+            context.drawImage(label, Math.floor((page.width - labelWidth) / 2), 0);
+            cached = thermalPixels(page);
+            pixelCache.set(cacheKey, cached);
+          }
         }
-        await invoke("print_thermal_bitmap", {
-          printerName,
-          ...thermalPixels(page),
-          paperWidthMm: paperW,
-          paperHeightMm: paperH,
-          cut: false,
-          drawerPin: null,
-        });
+        if (cached) {
+          labelsData.push(cached);
+        }
       }
-      setPrintNotice(`تم إرسال ${labels.length} ملصق للطابعة بنجاح`);
+
+      await invoke("print_thermal_labels", {
+        printerName,
+        labels: labelsData,
+        paperWidthMm: paperW,
+        paperHeightMm: paperH,
+      });
+      setPrintNotice(`تم إرسال ${labelsData.length} ملصق لطابعة الباركود دفعة واحدة بنجاح 🖨️`);
     } catch (error) {
       console.warn("Direct barcode print error, fallback to preview:", error);
       setPrintNotice(`تعذرت الطباعة المباشرة (${String(error)}) - جارٍ فتح معاينة الطباعة...`);
@@ -12313,7 +13143,7 @@ function PreviewBarcodeModal({
               شكل وطابع ملصقات الباركود كما ستظهر على طابعة الملصقات الحرارية
             </p>
           </div>
-          <button type="button" className="sheet-close" onClick={onClose}>
+          <button type="button" className="sheet-close" onClick={handleClose}>
             ✕
           </button>
         </div>
@@ -12383,7 +13213,7 @@ function PreviewBarcodeModal({
           </div>
         </div>
 
-        <div className="barcode-print-content" style={{ margin: "16px 0", maxHeight: "60vh", overflowY: "auto" }}>
+        <div className="barcode-print-content" style={{ margin: "16px 0", maxHeight: "60vh", overflowY: "auto", background: "#f2ece4", padding: "16px", borderRadius: "10px" }}>
           <div ref={labelsRef} className="barcode-stickers-grid">
             {stickersToPrint.map((item, idx) => {
               const code = item.barcode || `P${item.productId}`;
@@ -12414,8 +13244,8 @@ function PreviewBarcodeModal({
                     <div className="barcode-label-svg-wrap">
                       <BarcodeSVG
                         code={code}
-                        width={labelSize === "compact" ? 130 : labelSize === "large" ? 180 : 155}
-                        height={labelSize === "compact" ? 28 : labelSize === "large" ? 38 : 32}
+                        width={labelSize === "compact" ? 105 : labelSize === "large" ? 150 : 125}
+                        height={labelSize === "compact" ? 30 : labelSize === "large" ? 42 : 36}
                       />
                       <div className="barcode-label-code">{code}</div>
                     </div>
@@ -12436,27 +13266,47 @@ function PreviewBarcodeModal({
             جاهز للطباعة على طابعة الملصقات الحرارية (Thermal Barcode Printer)
           </span>
           <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-            <input
-              aria-label="طابعة الباركود في ويندوز"
-              list="barcode-printer-names"
-              placeholder="اسم طابعة الباركود"
-              value={barcodePrinter}
-              onChange={(event) => {
-                setBarcodePrinter(event.target.value);
-                localStorage.setItem("morsi.barcodePrinter", event.target.value);
-              }}
-              style={{ width: "180px" }}
-            />
-            <datalist id="barcode-printer-names">
-              {printerNames.map((name) => <option key={name} value={name} />)}
-            </datalist>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: "#5d3a28", fontWeight: 700 }}>🖨️ طابعة الباركود:</span>
+              <select
+                aria-label="طابعة الباركود في ويندوز"
+                value={barcodePrinter}
+                onChange={(event) => {
+                  setBarcodePrinter(event.target.value);
+                  localStorage.setItem("morsi.barcodePrinter", event.target.value);
+                }}
+                style={{
+                  minWidth: "170px",
+                  padding: "7px 12px",
+                  borderRadius: "6px",
+                  fontWeight: "bold",
+                  fontSize: "13px",
+                  border: "1.5px solid #c99a59",
+                  background: "#fff",
+                  color: "#34231c",
+                  cursor: "pointer",
+                }}
+              >
+                {printerNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+                {barcodePrinter && !printerNames.includes(barcodePrinter) && (
+                  <option value={barcodePrinter}>{barcodePrinter}</option>
+                )}
+                {!printerNames.length && !barcodePrinter && (
+                  <option value="">(لم يتم العثور على طابعات)</option>
+                )}
+              </select>
+            </div>
             <button
               type="button"
               className="primary"
               style={{ background: "#24742c", borderColor: "#24742c", padding: "10px 20px", fontSize: "14px", fontWeight: "bold" }}
               onClick={() => void printLabelsDirect()}
               disabled={printing}
-              title="طباعة حرارية مباشرة وسريعة لطابعة الباركود (Enter)"
+              title="طباعة حرارية مباشرة وسريعة لطابعة الباركود دفعة واحدة (Enter)"
             >
               {printing ? "جارٍ إرسال الملصقات..." : "طباعة سريعة مباشرة"} 🖨️
             </button>
@@ -12465,11 +13315,11 @@ function PreviewBarcodeModal({
               className="secondary"
               style={{ padding: "10px 18px", fontSize: "14px", fontWeight: 700 }}
               onClick={() => void printLabelsPreview()}
-              title="معاينة وطباعة ويندوز (Ctrl+P)"
+              title="معاينة وطباعة ويندوز لجميع الكميات والملصقات (Ctrl+P)"
             >
               معاينة وطباعة ويندوز 🖨️
             </button>
-            <button type="button" className="secondary" onClick={onClose}>
+            <button type="button" className="secondary" onClick={handleClose}>
               إغلاق
             </button>
           </div>
@@ -13802,7 +14652,7 @@ function InventoryAudit({
             <p style={{ margin: "4px 0", color: "#666", fontSize: "14px" }}>
               {viewingSavedReport
                 ? `الشهر: ${viewingSavedReport.monthName} | تاريخ الحفظ: ${viewingSavedReport.createdAt} | بواسطة: ${viewingSavedReport.createdByName} | حالة الأرصدة: ${viewingSavedReport.balancesAdjusted ? "مُعتمدة ومُحدثة بالسيستم" : "تقرير رقابي (لم تُعدل الأرصدة)"}`
-                : `تاريخ الجرد: ${new Date().toLocaleString("ar-EG")} | بواسطة: ${session.full_name}`}
+                : `تاريخ الجرد: ${formatDateTime(new Date().toISOString())} | بواسطة: ${session.full_name}`}
             </p>
           </div>
 

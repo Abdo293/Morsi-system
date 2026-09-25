@@ -109,9 +109,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             printer::get_default_receipt_printer,
+            printer::set_default_receipt_printer,
             printer::list_receipt_printers,
             printer::pulse_cash_drawer,
             printer::print_thermal_bitmap,
+            printer::print_thermal_labels,
             printer::print_document_pages,
             storage::setup_required,
             storage::bootstrap_admin,
@@ -149,6 +151,8 @@ pub fn run() {
             storage::check_in_employee,
             storage::check_out_employee,
             storage::reset_employee_attendance,
+            storage::toggle_attendance_overtime_paid,
+            storage::settle_employee_overtime,
             storage::get_telegram_settings,
             storage::configure_telegram,
             storage::test_telegram,
