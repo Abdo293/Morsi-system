@@ -111,6 +111,8 @@ pub fn run() {
             printer::get_default_receipt_printer,
             printer::list_receipt_printers,
             printer::pulse_cash_drawer,
+            printer::print_thermal_bitmap,
+            printer::print_document_pages,
             storage::setup_required,
             storage::bootstrap_admin,
             storage::list_login_users,
