@@ -468,69 +468,86 @@ export function printBarcodeStickersHtml(
       border: none !important;
       box-shadow: none !important;
       border-radius: 0 !important;
-      padding: 1.5mm !important;
+      padding: ${labelSize === "compact" ? "1mm" : "1.5mm"} !important;
       box-sizing: border-box !important;
+      overflow: hidden !important;
       display: flex !important;
       flex-direction: column !important;
-      justify-content: space-between !important;
+      justify-content: center !important;
       align-items: center !important;
       text-align: center !important;
       background: #fff !important;
       color: #000 !important;
     }
-    .barcode-label-header {
+    .barcode-label-inner {
       width: 100%;
+      height: 100%;
       display: flex;
-      justify-content: space-between;
+      flex-direction: column;
       align-items: center;
-      font-size: 8px;
-      font-weight: 700;
-      border-bottom: 1px solid #000;
-      padding-bottom: 1px;
-      margin-bottom: 1px;
+      justify-content: space-between;
+      gap: 1px;
+      overflow: hidden;
     }
     .barcode-label-name {
-      font-size: ${labelSize === "compact" ? "9px" : "11px"};
+      font-size: ${labelSize === "compact" ? "9px" : labelSize === "standard" ? "11px" : "13px"};
       font-weight: 800;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       width: 100%;
-      margin: 1px 0;
+      margin: 0;
+      line-height: 1.15;
     }
     .barcode-label-variant {
-      font-size: 8px;
-      color: #333;
-      margin-bottom: 1px;
+      font-size: ${labelSize === "compact" ? "7.5px" : "9px"};
+      color: #222;
+      margin: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+      line-height: 1.1;
+    }
+    .barcode-variant-sep {
+      margin: 0 2px;
+      font-weight: bold;
+    }
+    .barcode-label-loc {
+      font-size: ${labelSize === "compact" ? "7.5px" : "8.5px"};
+      color: #444;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+      line-height: 1.1;
     }
     .barcode-label-svg-wrap {
       width: 100%;
       display: flex;
+      flex-direction: column;
+      align-items: center;
       justify-content: center;
       margin: 1px 0;
     }
     .barcode-label-svg-wrap svg {
       max-width: 95%;
-      height: ${labelSize === "compact" ? "22px" : labelSize === "standard" ? "30px" : "40px"} !important;
+      height: ${labelSize === "compact" ? "20px" : labelSize === "standard" ? "28px" : "36px"} !important;
+      display: block;
     }
     .barcode-label-code {
       font-family: monospace;
-      font-size: 8.5px;
-      font-weight: 700;
+      font-size: ${labelSize === "compact" ? "8px" : "9.5px"};
+      font-weight: 800;
       letter-spacing: 1px;
-    }
-    .barcode-label-price-tag {
-      width: 100%;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-top: 1px dashed #000;
-      padding-top: 1px;
+      line-height: 1;
       margin-top: 1px;
     }
     .barcode-label-price {
-      font-size: ${labelSize === "compact" ? "10px" : "12px"};
+      font-size: ${labelSize === "compact" ? "9.5px" : labelSize === "standard" ? "12px" : "14px"};
       font-weight: 900;
+      line-height: 1.15;
+      margin: 0;
     }
   `;
 
