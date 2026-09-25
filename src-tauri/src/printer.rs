@@ -26,13 +26,16 @@ pub async fn list_receipt_printers() -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub async fn pulse_cash_drawer(printer_name: String, pin: u8) -> Result<(), String> {
-    if printer_name.trim().is_empty() {
-        return Err("اختر طابعة الإيصالات أولاً".into());
-    }
+    let name = printer_name.trim().to_string();
+    let target = if name.is_empty() {
+        platform::default_printer()?
+    } else {
+        name
+    };
     if pin > 1 {
         return Err("منفذ الدرج غير صالح".into());
     }
-    tauri::async_runtime::spawn_blocking(move || platform::pulse(&printer_name, pin))
+    tauri::async_runtime::spawn_blocking(move || platform::pulse(&target, pin))
         .await
         .map_err(|error| error.to_string())?
 }
@@ -416,7 +419,8 @@ mod platform {
                 return Err(os_error("تعذر بدء مهمة الطباعة"));
             }
 
-            // Note: For RAW data types (commands/ESC-POS), do NOT call StartPagePrinter/EndPagePrinter.
+            let page_started = unsafe { StartPagePrinter(handle) } != 0;
+
             let mut sent = 0usize;
             let mut error = None;
             while sent < bytes.len() {
@@ -436,13 +440,19 @@ mod platform {
                 sent += written as usize;
             }
 
+            let page_end_error = if page_started && unsafe { EndPagePrinter(handle) } == 0 {
+                Some(os_error("تعذر إنهاء صفحة الطباعة"))
+            } else {
+                None
+            };
+
             let doc_end_error = if unsafe { EndDocPrinter(handle) } == 0 {
                 Some(os_error("تعذر إنهاء مهمة الطباعة"))
             } else {
                 None
             };
 
-            if let Some(err) = error.or(doc_end_error) {
+            if let Some(err) = error.or(page_end_error).or(doc_end_error) {
                 Err(err)
             } else {
                 Ok(())
@@ -452,12 +462,45 @@ mod platform {
         result
     }
 
+    pub fn drawer_kick_bytes(pin: Option<u8>) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(64);
+
+        // 1. DLE DC4 real-time kick out (bypasses buffers, works in graphics/driver mode)
+        bytes.extend_from_slice(&[0x10, 0x14, 0x01, 0x00, 0x08]); // pin 2
+        bytes.extend_from_slice(&[0x10, 0x14, 0x01, 0x01, 0x08]); // pin 5
+
+        // 2. Standard ESC/POS ESC p: [0x1b, 0x70, pin, on_time, off_time]
+        // Send strong 120ms pulse for both Pin 2 and Pin 5, numeric and ASCII ('0', '1')
+        match pin {
+            Some(1) => {
+                bytes.extend_from_slice(&[0x1b, 0x70, 1, 60, 255]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 49, 60, 255]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 0, 60, 255]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 48, 60, 255]);
+            }
+            _ => {
+                bytes.extend_from_slice(&[0x1b, 0x70, 0, 60, 255]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 48, 60, 255]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 1, 60, 255]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 49, 60, 255]);
+            }
+        }
+
+        // 3. Star Micronics & POS BEL character
+        bytes.push(0x07);
+
+        // 4. FS p alternative drawer kick
+        bytes.extend_from_slice(&[0x1c, 0x70, 0, 60, 255]);
+
+        bytes
+    }
+
     pub fn pulse(printer_name: &str, pin: u8) -> Result<(), String> {
-        // ESC p, 100 ms pulse on the selected drawer connector pin.
+        let bytes = drawer_kick_bytes(Some(pin));
         send_raw_job(
             printer_name,
             "Morsi cash drawer",
-            &[0x1b, 0x70, pin, 50, 100],
+            &bytes,
         )
     }
 
@@ -589,15 +632,17 @@ mod platform {
         unsafe { DeleteDC(dc) };
         result?;
 
-        // Pulse cash drawer if requested
+        // Pulse cash drawer and/or cut paper in a single raw job if requested
+        let mut raw_post = Vec::new();
         if let Some(pin) = drawer_pin {
-            let _ = pulse(printer_name, pin);
+            raw_post.extend_from_slice(&drawer_kick_bytes(Some(pin)));
         }
-
-        // Cut paper if requested
         if cut {
-            let cut_bytes = [0x1b, 0x64, 2, 0x1d, 0x56, 66, 0];
-            let _ = send_raw_job(printer_name, "Cut thermal paper", &cut_bytes);
+            raw_post.extend_from_slice(&[0x1d, 0x56, 66, 0]);
+        }
+        if !raw_post.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let _ = send_raw_job(printer_name, "Drawer/Cut", &raw_post);
         }
 
         Ok(())

@@ -205,20 +205,20 @@ input[type=number] {
 }
 
 .barcode-label-card.size-compact {
-  width: 155px;
-  min-height: 95px;
+  width: 165px;
+  min-height: 105px;
   padding: 5px 4px;
 }
 
 .barcode-label-card.size-standard {
-  width: 190px;
-  min-height: 115px;
+  width: 205px;
+  min-height: 130px;
   padding: 8px 6px;
 }
 
 .barcode-label-card.size-large {
-  width: 225px;
-  min-height: 135px;
+  width: 250px;
+  min-height: 165px;
   padding: 10px 8px;
 }
 
@@ -324,12 +324,12 @@ input[type=number] {
 }
 
 .barcode-label-card.size-large .barcode-label-code {
-  font-size: 14px;
+  font-size: 15.5px;
   letter-spacing: 2px;
 }
 
 .barcode-label-price {
-  font-size: 14.5px;
+  font-size: 15px;
   font-weight: 900;
   color: #000;
   direction: rtl;
@@ -337,11 +337,11 @@ input[type=number] {
 }
 
 .barcode-label-card.size-compact .barcode-label-price {
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .barcode-label-card.size-large .barcode-label-price {
-  font-size: 16.5px;
+  font-size: 18.5px;
 }
 
 @media print {
@@ -1137,7 +1137,7 @@ input[type=number] {
   color: #000000;
   font-family: 'Cairo', 'Segoe UI', Tahoma, monospace, sans-serif;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
-  padding: 2mm 2mm 4mm;
+  padding: 2mm 2mm 1.5mm;
   box-sizing: border-box;
   direction: rtl;
   text-align: right;
@@ -1421,7 +1421,7 @@ input[type=number] {
     max-height: none !important;
     overflow: visible !important;
     width: 70mm !important;
-    padding: 2mm 2mm 4mm !important;
+    padding: 2mm 2mm 1mm !important;
     margin: 0 auto !important;
     color: #000 !important;
   }

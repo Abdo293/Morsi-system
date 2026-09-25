@@ -147,7 +147,7 @@ export function printReceiptHtml(receiptNode: HTMLElement, paperSize: "80mm" | "
     .thermal-receipt-card {
       width: ${cardWidth} !important;
       max-width: ${cardWidth} !important;
-      padding: ${is58mm ? "2mm 1mm 4mm" : "3mm 2mm 5mm"} !important;
+      padding: ${is58mm ? "2mm 1mm 1.5mm" : "3mm 2mm 2mm"} !important;
       margin: 0 auto !important;
       box-shadow: none !important;
       border: none !important;
@@ -553,22 +553,22 @@ export function printBarcodeStickersHtml(
       margin: 1px 0;
     }
     .barcode-label-svg-wrap svg {
-      width: 68% !important;
-      max-width: 72% !important;
-      height: ${labelSize === "compact" ? "22px" : labelSize === "standard" ? "30px" : "38px"} !important;
+      width: 92% !important;
+      max-width: 95% !important;
+      height: ${labelSize === "compact" ? "38px" : labelSize === "standard" ? "52px" : "72px"} !important;
       display: block;
       margin: 0 auto !important;
     }
     .barcode-label-code {
       font-family: 'Courier New', Courier, monospace;
-      font-size: ${labelSize === "compact" ? "9.5px" : labelSize === "standard" ? "11px" : "13px"};
+      font-size: ${labelSize === "compact" ? "10px" : labelSize === "standard" ? "12px" : "15px"};
       font-weight: 900;
-      letter-spacing: 1px;
+      letter-spacing: 1.2px;
       line-height: 1;
       margin-top: 1px;
     }
     .barcode-label-price {
-      font-size: ${labelSize === "compact" ? "11.5px" : labelSize === "standard" ? "13.5px" : "16px"};
+      font-size: ${labelSize === "compact" ? "12.5px" : labelSize === "standard" ? "15px" : "18px"};
       font-weight: 900;
       line-height: 1.15;
       margin: 0;

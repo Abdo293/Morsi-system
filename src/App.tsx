@@ -11853,6 +11853,7 @@ function ThermalReceiptModal({
   const [printerNames, setPrinterNames] = useState<string[]>([]);
   const [drawerPin, setDrawerPin] = useState<0 | 1>(() => localStorage.getItem("morsi.drawerPin") === "1" ? 1 : 0);
   const [autoOpenDrawer, setAutoOpenDrawer] = useState(() => localStorage.getItem("morsi.autoOpenDrawer") !== "false");
+  const [autoCutPaper, setAutoCutPaper] = useState(() => localStorage.getItem("morsi.autoCutPaper") === "true");
   const [drawerNotice, setDrawerNotice] = useState("");
 
   const changeReceiptPrinter = useCallback((name: string) => {
@@ -11914,8 +11915,9 @@ function ThermalReceiptModal({
 
   const openDrawer = useCallback(async () => {
     try {
-      await invoke("pulse_cash_drawer", { printerName: receiptPrinter.trim(), pin: drawerPin });
-      setDrawerNotice("تم إرسال أمر فتح الدرج للطابعة");
+      const printer = receiptPrinter.trim() || (isTauri() ? await invoke<string>("get_default_receipt_printer").catch(() => "") : "");
+      await invoke("pulse_cash_drawer", { printerName: printer, pin: drawerPin });
+      setDrawerNotice("تم إرسال أمر فتح الدرج للطابعة بنجاح ⚡");
     } catch (error) {
       setDrawerNotice(`تعذر فتح الدرج: ${String(error)}`);
     }
@@ -11931,8 +11933,10 @@ function ThermalReceiptModal({
         await invoke("set_default_receipt_printer", { printerName: receiptPrinter.trim() }).catch(() => {});
       }
       await printReceiptHtml(receiptRef.current, paperSize);
-      if (autoOpenDrawer && isTauri() && receiptPrinter.trim()) {
-        void openDrawer();
+      if (autoOpenDrawer && isTauri()) {
+        setTimeout(() => {
+          void openDrawer();
+        }, 300);
       }
     } catch (error) {
       setDrawerNotice(`تعذرت معاينة/طباعة الفاتورة: ${String(error)}`);
@@ -11959,9 +11963,14 @@ function ThermalReceiptModal({
         ...thermalPixels(receipt),
         paperWidthMm: paperSize === "80mm" ? 80 : 58,
         paperHeightMm: 0,
-        cut: true,
+        cut: autoCutPaper,
         drawerPin: autoOpenDrawer ? drawerPin : null,
       });
+      if (autoOpenDrawer) {
+        setTimeout(() => {
+          void openDrawer();
+        }, 300);
+      }
       setDrawerNotice(autoOpenDrawer ? "تمت طباعة الفاتورة وإرسال أمر فتح الدرج بنجاح" : "تمت طباعة الفاتورة بنجاح");
     } catch (error) {
       console.warn("Direct thermal print error, opening preview print fallback:", error);
@@ -11974,7 +11983,7 @@ function ThermalReceiptModal({
     } finally {
       setPrintingDirect(false);
     }
-  }, [paperSize, receiptPrinter, drawerPin, autoOpenDrawer, printReceiptPreview]);
+  }, [paperSize, receiptPrinter, drawerPin, autoOpenDrawer, autoCutPaper, printReceiptPreview, openDrawer]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -12116,6 +12125,17 @@ function ThermalReceiptModal({
             />
             فتح درج الكاشير بعد طباعة الفاتورة
           </label>
+          <label className="thermal-drawer-auto" title="مُعطل افتراضياً لأن تعريف الطابعة يقوم بالقص تلقائياً، قم بتفعيله فقط إذا كانت طابعتك لا تقص">
+            <input
+              type="checkbox"
+              checked={autoCutPaper}
+              onChange={(event) => {
+                setAutoCutPaper(event.target.checked);
+                localStorage.setItem("morsi.autoCutPaper", String(event.target.checked));
+              }}
+            />
+            أمر قص إضافي من السيستم
+          </label>
           <span style={{ fontSize: "12px", color: "#666" }}>
             (عبر طابعة: <strong>{receiptPrinter || "الافتراضية"}</strong>)
           </span>
@@ -12131,8 +12151,8 @@ function ThermalReceiptModal({
             <option value={0}>منفذ 2</option>
             <option value={1}>منفذ 5</option>
           </select>
-          <button type="button" className="secondary" onClick={() => void openDrawer()} disabled={!receiptPrinter.trim()}>
-            تجربة فتح الدرج
+          <button type="button" className="secondary" onClick={() => void openDrawer()}>
+            تجربة فتح الدرج ⚡
           </button>
           {drawerNotice && <small role="status">{drawerNotice}</small>}
         </div>
@@ -12148,16 +12168,6 @@ function ThermalReceiptModal({
             />
             <div className="thermal-receipt-title">MORSI FOR BELT</div>
             <div className="thermal-receipt-address">طنطا - شارع القنطرة</div>
-            <div className="thermal-receipt-contacts">
-              <div className="thermal-receipt-contacts-row">
-                <span>لطلبات الأونلاين:</span>
-                <strong dir="ltr">01284888405</strong>
-              </div>
-              <div className="thermal-receipt-contacts-row">
-                <span>رقم الشكاوى والمقترحات:</span>
-                <strong dir="ltr">01270202539</strong>
-              </div>
-            </div>
           </div>
 
           <div className="thermal-receipt-divider-double" />
@@ -12362,8 +12372,18 @@ function ThermalReceiptModal({
           {/* Return Policy & Store Greeting */}
           <div className="thermal-receipt-footer">
             <div>• برجاء الحفاظ على الفاتورة لضمان حقك في الاستبدال أو الاسترجاع خلال 14 يوم</div>
-            <div style={{ marginTop: "6px", fontWeight: 700 }}>
+            {/* <div style={{ marginTop: "6px", fontWeight: 700 }}>
               علموا اولادكم ان القدس ستبقى عربية ❤️
+            </div> */}
+            <div className="thermal-receipt-contacts">
+              <div className="thermal-receipt-contacts-row">
+                <span>لطلبات الأونلاين:</span>
+                <strong dir="ltr">01284888405</strong>
+              </div>
+              <div className="thermal-receipt-contacts-row">
+                <span>رقم الشكاوى والمقترحات:</span>
+                <strong dir="ltr">01270202539</strong>
+              </div>
             </div>
             <div className="thermal-receipt-socials">
               <p>👇مستنيك هنا👇</p>
@@ -12376,10 +12396,6 @@ function ThermalReceiptModal({
                 <span>Morsi_For_Belt - مرسى للجلود</span>
               </div>
             </div>
-          </div>
-
-          <div className="thermal-receipt-paper-cut">
-            - - - - - - - - - - - - - - - - - - - - - - - -
           </div>
         </div>
       </div>
@@ -13075,14 +13091,14 @@ function PreviewBarcodeModal({
           const domCard = labels[index];
           if (domCard) {
             const page = document.createElement("canvas");
-            page.width = 576;
+            page.width = labelWidth;
             page.height = labelHeight;
             const context = page.getContext("2d");
             if (!context) throw new Error("تعذر تجهيز ملصقات الطباعة");
             context.fillStyle = "#fff";
             context.fillRect(0, 0, page.width, page.height);
             const label = await thermalCanvas(domCard, labelWidth, labelHeight);
-            context.drawImage(label, Math.floor((page.width - labelWidth) / 2), 0);
+            context.drawImage(label, 0, 0, labelWidth, labelHeight);
             cached = thermalPixels(page);
             pixelCache.set(cacheKey, cached);
           }
@@ -13244,8 +13260,8 @@ function PreviewBarcodeModal({
                     <div className="barcode-label-svg-wrap">
                       <BarcodeSVG
                         code={code}
-                        width={labelSize === "compact" ? 105 : labelSize === "large" ? 150 : 125}
-                        height={labelSize === "compact" ? 30 : labelSize === "large" ? 42 : 36}
+                        width={labelSize === "compact" ? 140 : labelSize === "large" ? 220 : 180}
+                        height={labelSize === "compact" ? 42 : labelSize === "large" ? 70 : 54}
                       />
                       <div className="barcode-label-code">{code}</div>
                     </div>
