@@ -61,6 +61,7 @@ pub struct PeriodSummary {
     pub refunds_piasters: i64,
     pub refunds_count: i64,
     pub net_sales_piasters: i64,
+    pub profit_piasters: i64,
     pub collected_piasters: i64,
     pub credit_sales_piasters: i64,
     pub debt_collected_piasters: i64,
@@ -757,16 +758,13 @@ pub async fn dashboard(state: tauri::State<'_, AppState>, token: String) -> Resu
         })
         .collect();
 
-    let today_summary = PeriodSummary {
-        gross_sales_piasters: today_gross_sales_piasters,
-        refunds_piasters: today_refunds_piasters,
-        refunds_count: today_refunds_count,
-        net_sales_piasters: today_net_sales_piasters,
-        collected_piasters: today_collected_piasters,
-        credit_sales_piasters: today_credit_sales_piasters,
-        debt_collected_piasters: today_debt_collected_piasters,
-        invoices_count: today_invoices_count,
-    };
+    let today_summary = calc_period_summary(
+        &state.pool,
+        "date(created_at, 'localtime') = date('now', 'localtime')",
+        "date(created_at, 'localtime') = date('now', 'localtime')",
+    )
+    .await
+    .map_err(db_error)?;
 
     let week_summary = calc_period_summary(
         &state.pool,
@@ -820,6 +818,8 @@ async fn calc_period_summary(
     where_inv: &str,
     where_other: &str,
 ) -> Result<PeriodSummary, sqlx::Error> {
+    let profit_invoice_filter = where_inv.replace("created_at", "i.created_at");
+    let profit_refund_filter = where_other.replace("created_at", "r.created_at");
     let sql = format!(
         "SELECT
           (SELECT COUNT(*) FROM invoices WHERE status = 'COMPLETED' AND {where_inv}) AS invoices_count,
@@ -829,7 +829,20 @@ async fn calc_period_summary(
           (SELECT COUNT(*) FROM refunds WHERE {where_other}) AS refunds_count,
           (SELECT COALESCE(SUM(total_refund_piasters), 0) FROM refunds WHERE {where_other}) AS refunds_piasters,
           (SELECT COALESCE(SUM(total_refund_piasters), 0) FROM refunds WHERE {where_other} AND refund_method IN ('CASH', 'INSTAPAY', 'WALLET')) AS refunds_paid_out_piasters,
-          (SELECT COALESCE(SUM(amount_piasters), 0) FROM customer_payments WHERE {where_other}) AS debt_collected_piasters"
+          (SELECT COALESCE(SUM(amount_piasters), 0) FROM customer_payments WHERE {where_other}) AS debt_collected_piasters,
+          (SELECT COALESCE(SUM(i.total_piasters - COALESCE(oo.shipping_fee, 0) - COALESCE(cost.item_cost, 0)), 0)
+           FROM invoices i
+           LEFT JOIN (SELECT invoice_id, SUM(buy_price_piasters * quantity) AS item_cost
+                      FROM invoice_items GROUP BY invoice_id) cost ON cost.invoice_id = i.id
+           LEFT JOIN (SELECT invoice_id, SUM(shipping_fee_piasters) AS shipping_fee
+                      FROM online_orders WHERE invoice_id IS NOT NULL GROUP BY invoice_id) oo ON oo.invoice_id = i.id
+           WHERE i.status IN ('COMPLETED', 'CANCELLED') AND {profit_invoice_filter}) AS sales_profit_piasters,
+          (SELECT COALESCE(SUM(r.total_refund_piasters - COALESCE(cost.item_cost, 0)), 0)
+           FROM refunds r
+           LEFT JOIN (SELECT ri.refund_id, SUM(ri.quantity * ii.buy_price_piasters) AS item_cost
+                      FROM refund_items ri JOIN invoice_items ii ON ii.id = ri.invoice_item_id
+                      GROUP BY ri.refund_id) cost ON cost.refund_id = r.id
+           WHERE {profit_refund_filter}) AS refunded_profit_piasters"
     );
 
     let row = sqlx::query(&sql).fetch_one(pool).await?;
@@ -842,7 +855,10 @@ async fn calc_period_summary(
     let refunds_piasters: i64 = row.get("refunds_piasters");
     let refunds_paid_out_piasters: i64 = row.get("refunds_paid_out_piasters");
     let debt_collected_piasters: i64 = row.get("debt_collected_piasters");
+    let sales_profit_piasters: i64 = row.get("sales_profit_piasters");
+    let refunded_profit_piasters: i64 = row.get("refunded_profit_piasters");
 
+    let profit_piasters = sales_profit_piasters - refunded_profit_piasters;
     let net_sales_piasters = gross_sales_piasters - refunds_piasters;
     let collected_piasters = (invoice_collected_piasters + debt_collected_piasters) - refunds_paid_out_piasters;
 
@@ -851,6 +867,7 @@ async fn calc_period_summary(
         refunds_piasters,
         refunds_count,
         net_sales_piasters,
+        profit_piasters,
         collected_piasters,
         credit_sales_piasters,
         debt_collected_piasters,
@@ -6107,6 +6124,145 @@ pub async fn open_backups_directory(
     Ok(path_str)
 }
 
+#[tauri::command]
+pub async fn factory_reset_system(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    token: String,
+    password: String,
+    create_safety_backup: bool,
+    clear_backups: bool,
+) -> Result<String, String> {
+    let user = state.user(&token, true)?;
+
+    if password.trim().is_empty() {
+        return Err("يرجى إدخال كلمة مرور المدير لتأكيد العملية".into());
+    }
+
+    // Verify admin password
+    let row = sqlx::query("SELECT password_hash FROM users WHERE id = ?")
+        .bind(user.user_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(db_error)?
+        .ok_or("تعذر العثور على حساب المدير")?;
+    let hash: String = row.get("password_hash");
+    let parsed = PasswordHash::new(&hash).map_err(|_| "تعذر قراءة كلمة المرور")?;
+    Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .map_err(|_| "كلمة المرور غير صحيحة، تم إلغاء العملية لحماية النظام")?;
+
+    let backup_dir = state.data_dir.join("backups");
+    std::fs::create_dir_all(&backup_dir).map_err(|e| format!("تعذر إنشاء مجلد النسخ: {e}"))?;
+
+    // Optional safety backup before wiping
+    if create_safety_backup {
+        let now_cairo = Utc::now().with_timezone(&Cairo);
+        let safety_name = format!("safety-before-factory-reset-{}.sqlite", now_cairo.format("%Y-%m-%d_%H-%M-%S"));
+        let safety_path = backup_dir.join(&safety_name);
+        let safety_path_str = safety_path.to_string_lossy().into_owned();
+        let _ = sqlx::query("VACUUM INTO ?")
+            .bind(&safety_path_str)
+            .execute(&state.pool)
+            .await;
+
+        update_backup_manifest(&backup_dir, &safety_name, BackupManifestEntry {
+            note: Some("نسخة أمان تلقائية قبل إعادة ضبط المصنع ومسح النظام بالكامل".into()),
+            backup_type: "SAFETY".into(),
+            created_at: now_cairo.format("%Y-%m-%d %H:%M:%S").to_string(),
+            created_by: Some(user.full_name),
+        });
+    }
+
+    // Checkpoint WAL and close connection pool
+    let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE);").execute(&state.pool).await;
+    state.pool.close().await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+    // Delete active SQLite database files
+    let live_db = state.data_dir.join("cashier.sqlite");
+    let wal = state.data_dir.join("cashier.sqlite-wal");
+    let shm = state.data_dir.join("cashier.sqlite-shm");
+    let _ = std::fs::remove_file(live_db);
+    let _ = std::fs::remove_file(wal);
+    let _ = std::fs::remove_file(shm);
+
+    // If clear_backups requested, clear the backup folder
+    if clear_backups {
+        if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+    }
+
+    // Restart application cleanly
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+        app.restart();
+    });
+
+    Ok("تمت تهيئة النظام وضبط المصنع بنجاح! جاري إعادة تشغيل البرنامج الآن...".into())
+}
+
+#[cfg(test)]
+mod dashboard_profit_tests {
+    use super::*;
+
+    #[test]
+    fn profit_uses_sale_cost_refund_cost_and_excludes_shipping() {
+        tauri::async_runtime::block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            for statement in [
+                "CREATE TABLE invoices (id INTEGER, status TEXT, total_piasters INTEGER, remaining_piasters INTEGER, paid_cash_piasters INTEGER, paid_instapay_piasters INTEGER, paid_wallet_piasters INTEGER, created_at TEXT)",
+                "CREATE TABLE invoice_items (id INTEGER, invoice_id INTEGER, buy_price_piasters INTEGER, quantity INTEGER)",
+                "CREATE TABLE online_orders (invoice_id INTEGER, shipping_fee_piasters INTEGER)",
+                "CREATE TABLE refunds (id INTEGER, total_refund_piasters INTEGER, refund_method TEXT, created_at TEXT)",
+                "CREATE TABLE refund_items (refund_id INTEGER, invoice_item_id INTEGER, quantity INTEGER)",
+                "CREATE TABLE customer_payments (amount_piasters INTEGER, created_at TEXT)",
+            ] {
+                sqlx::query(statement).execute(&pool).await.unwrap();
+            }
+            for statement in [
+                "INSERT INTO invoices VALUES (1, 'COMPLETED', 10000, 0, 10000, 0, 0, '2026-09-24')",
+                "INSERT INTO invoices VALUES (2, 'CANCELLED', 5000, 0, 5000, 0, 0, '2026-09-24')",
+                "INSERT INTO invoices VALUES (3, 'COMPLETED', 7000, 0, 7000, 0, 0, '2026-09-25')",
+                "INSERT INTO invoice_items VALUES (11, 1, 2500, 2)",
+                "INSERT INTO invoice_items VALUES (12, 1, 1000, 1)",
+                "INSERT INTO invoice_items VALUES (21, 2, 3000, 1)",
+                "INSERT INTO invoice_items VALUES (31, 3, 4000, 1)",
+                "INSERT INTO online_orders VALUES (3, 500)",
+                "INSERT INTO refunds VALUES (1, 4000, 'CASH', '2026-09-25')",
+                "INSERT INTO refund_items VALUES (1, 11, 1)",
+                "INSERT INTO refunds VALUES (2, 5000, 'CASH', '2026-09-25')",
+                "INSERT INTO refund_items VALUES (2, 21, 1)",
+            ] {
+                sqlx::query(statement).execute(&pool).await.unwrap();
+            }
+
+            let all = calc_period_summary(&pool, "1=1", "1=1").await.unwrap();
+            assert_eq!(all.profit_piasters, 5000);
+
+            let today = calc_period_summary(
+                &pool,
+                "date(created_at) = '2026-09-25'",
+                "date(created_at) = '2026-09-25'",
+            )
+            .await
+            .unwrap();
+            assert_eq!(today.profit_piasters, -1000);
+        });
+    }
+}
+
 #[cfg(test)]
 mod staff_workflow_tests {
     use super::*;
@@ -6538,6 +6694,49 @@ mod staff_workflow_tests {
             assert_eq!(u0, "admin_root");
             let u1: String = rows[1].get("username");
             assert_eq!(u1, "seller1");
+
+            pool.close().await;
+            let _ = std::fs::remove_file(db_path);
+        });
+    }
+
+    #[test]
+    fn test_factory_reset_password_verification() {
+        tauri::async_runtime::block_on(async {
+            let db_path = format!("/tmp/test_morsi_factory_reset_{}.db", uuid::Uuid::new_v4());
+            let pool = SqlitePoolOptions::new()
+                .connect(&format!("sqlite://{}?mode=rwc", db_path))
+                .await
+                .unwrap();
+            MIGRATOR.run(&pool).await.unwrap();
+
+            let salt = SaltString::generate(&mut OsRng);
+            let hash = Argon2::default()
+                .hash_password(b"secretAdminPass123", &salt)
+                .unwrap()
+                .to_string();
+
+            let admin_id: i64 = sqlx::query(
+                "INSERT INTO users(username, password_hash, full_name, role) VALUES ('admin_test', ?, 'مدير الاختبار', 'ADMIN')"
+            )
+            .bind(&hash)
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+
+            // Verify correct password succeeds
+            let row = sqlx::query("SELECT password_hash FROM users WHERE id = ?")
+                .bind(admin_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            let db_hash: String = row.get("password_hash");
+            let parsed = PasswordHash::new(&db_hash).unwrap();
+            assert!(Argon2::default().verify_password(b"secretAdminPass123", &parsed).is_ok());
+
+            // Verify wrong password fails
+            assert!(Argon2::default().verify_password(b"wrongPassword", &parsed).is_err());
 
             pool.close().await;
             let _ = std::fs::remove_file(db_path);

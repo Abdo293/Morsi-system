@@ -350,6 +350,72 @@ input[type=number] {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
+
+  /* The preview lives outside #root so the label paper contains only stickers. */
+  .barcode-print-overlay {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+    overflow: visible !important;
+  }
+  .barcode-print-modal-only,
+  .barcode-print-content {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  .barcode-stickers-grid {
+    display: block !important;
+    width: 100% !important;
+  }
+  .barcode-label-card.size-compact { --label-width: 40mm; --label-height: 25mm; }
+  .barcode-label-card.size-standard { --label-width: 50mm; --label-height: 30mm; }
+  .barcode-label-card.size-large { --label-width: 60mm; --label-height: 40mm; }
+  .barcode-label-card {
+    width: calc(var(--label-width) - 0.6mm) !important;
+    height: calc(var(--label-height) - 0.6mm) !important;
+    min-height: 0 !important;
+    padding: 0.7mm 1.2mm !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    justify-content: center !important;
+    break-after: page !important;
+    page-break-after: always !important;
+  }
+  .barcode-label-card:last-child {
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+  .barcode-label-inner { gap: 0.3mm !important; }
+  .barcode-label-svg-wrap { margin: 0 !important; }
+  .barcode-label-svg-wrap svg {
+    width: 90% !important;
+    max-width: 100% !important;
+    height: 7mm !important;
+  }
+  .barcode-label-card.size-compact .barcode-label-svg-wrap svg { height: 6mm !important; }
+  .barcode-label-card.size-large .barcode-label-svg-wrap svg { height: 10mm !important; }
+  .barcode-label-name { font-size: 8pt !important; }
+  .barcode-label-variant,
+  .barcode-label-loc { font-size: 6.5pt !important; }
+  .barcode-label-code { font-size: 7pt !important; margin-top: 0 !important; }
+  .barcode-label-price { font-size: 8pt !important; }
+  .barcode-label-card.size-compact .barcode-label-name { font-size: 7pt !important; }
+  .barcode-label-card.size-compact .barcode-label-variant,
+  .barcode-label-card.size-compact .barcode-label-loc { font-size: 6pt !important; }
+  .barcode-label-card.size-compact .barcode-label-price { font-size: 7pt !important; }
 }
 .attendance-widget{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px;background:#fffaf4}.attendance-widget strong{color:#543729}.attendance-widget p{margin:2px 0;font-size:12px}.attendance-widget small{display:block;color:#785038}.attendance-error{width:100%;color:#a34331!important;margin:0!important}.staff-admin-stack{display:grid;gap:20px}.staff-form-grid{display:grid;grid-template-columns:2fr 1.5fr 1fr auto;gap:12px;align-items:end}.staff-form-grid label{margin:0}.staff-form-grid button{min-height:42px}.staff-actions{display:flex;gap:9px;flex-wrap:wrap;margin:12px 0}.staff-filters{display:flex;gap:12px;align-items:end;margin-bottom:16px;flex-wrap:wrap}.staff-filters>.field{min-width:230px}.staff-filters label{margin:0}.staff-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:20px}.staff-summary>div{border:1px solid #e9e1d9;background:#faf8f5;border-radius:10px;padding:12px}.staff-summary span,.staff-summary strong{display:block}.staff-summary span{font-size:12px;color:#8b7b70}.staff-summary strong{margin-top:5px;font-size:16px;color:#543729}.staff-money-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.staff-money-grid form{border:1px solid #e9e1d9;border-radius:12px;padding:16px;background:#fffdfb}.staff-money-grid h3{margin-bottom:12px}.staff-money-grid label{display:block}.staff-admin-stack .panel>h3{margin:24px 0 10px}.staff-repayment{display:flex;align-items:end;flex-wrap:wrap;gap:10px;padding:14px;margin-top:12px;background:#fff8ee;border:1px solid #e2c9a8;border-radius:10px}.staff-repayment label{min-width:150px;margin:0}@media(max-width:1000px){.staff-form-grid,.staff-money-grid{grid-template-columns:1fr}}
 
@@ -962,6 +1028,7 @@ input[type=number] {
   align-items: center;
   gap: 14px;
   max-height: 96vh;
+  margin: auto;
 }
 
 .thermal-receipt-controls {
@@ -977,6 +1044,38 @@ input[type=number] {
   flex-wrap: wrap;
   justify-content: center;
 }
+
+.thermal-drawer-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: min(90vw, 780px);
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #fff;
+  direction: rtl;
+}
+.thermal-drawer-controls .thermal-drawer-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  white-space: nowrap;
+}
+.thermal-drawer-controls input:not([type=checkbox]) {
+  width: 220px;
+  padding: 6px 8px;
+}
+.thermal-drawer-controls select {
+  padding: 6px 8px;
+  border: 1px solid #e0d7ce;
+  border-radius: 8px;
+  background: #fff;
+}
+.thermal-drawer-controls button { padding: 6px 10px; }
+.thermal-drawer-controls small { flex-basis: 100%; text-align: center; color: #785038; }
 
 .thermal-size-btn {
   background: #3e2d24;
@@ -1002,7 +1101,7 @@ input[type=number] {
   color: #000000;
   font-family: 'Cairo', 'Segoe UI', Tahoma, monospace, sans-serif;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
-  padding: 16px 12px 24px;
+  padding: 2mm 2mm 4mm;
   box-sizing: border-box;
   direction: rtl;
   text-align: right;
@@ -1013,13 +1112,13 @@ input[type=number] {
 }
 
 .thermal-receipt-card.width-80mm {
-  width: 78mm;
-  max-width: 320px;
+  width: 70mm;
+  max-width: 70mm;
 }
 
 .thermal-receipt-card.width-58mm {
-  width: 56mm;
-  max-width: 250px;
+  width: 46mm;
+  max-width: 46mm;
   font-size: 11px;
 }
 
@@ -1086,6 +1185,8 @@ input[type=number] {
 .thermal-receipt-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
+  white-space: normal;
   font-size: 11.5px;
   margin: 6px 0;
 }
@@ -1097,6 +1198,15 @@ input[type=number] {
   padding: 4px 2px;
   font-weight: 800;
   font-size: 11px;
+}
+
+.thermal-receipt-table th:nth-child(2) { width: 12% !important; }
+.thermal-receipt-table th:nth-child(3) { width: 20% !important; }
+.thermal-receipt-table th:nth-child(4) { width: 23% !important; }
+
+.thermal-receipt-table td:first-child,
+.thermal-receipt-table th:first-child {
+  overflow-wrap: anywhere;
 }
 
 .thermal-receipt-table td {
@@ -1213,7 +1323,7 @@ input[type=number] {
 /* Thermal Printer Media Print Rules */
 @media print {
   .thermal-receipt-overlay {
-    position: absolute !important;
+    position: static !important;
     inset: 0 !important;
     background: #fff !important;
     padding: 0 !important;
@@ -1227,6 +1337,7 @@ input[type=number] {
     display: block !important;
     width: 100% !important;
     max-height: none !important;
+    overflow: visible !important;
     padding: 0 !important;
     margin: 0 !important;
   }
@@ -1241,19 +1352,37 @@ input[type=number] {
     border-radius: 0 !important;
     max-height: none !important;
     overflow: visible !important;
-    padding: 1mm 1mm 4mm !important;
+    width: 70mm !important;
+    padding: 2mm 2mm 4mm !important;
     margin: 0 auto !important;
     color: #000 !important;
   }
 
   .thermal-receipt-card.width-80mm {
-    width: 76mm !important;
-    max-width: 76mm !important;
+    width: 70mm !important;
+    max-width: 70mm !important;
   }
 
   .thermal-receipt-card.width-58mm {
-    width: 52mm !important;
-    max-width: 52mm !important;
+    width: 46mm !important;
+    max-width: 46mm !important;
+  }
+
+  /* Keep the invoice table as it appears in the receipt preview. */
+  .thermal-receipt-table {
+    border: 0 !important;
+  }
+  .thermal-receipt-table th,
+  .thermal-receipt-table td {
+    border: 0 !important;
+    padding: 4px 2px !important;
+    font-size: 11px !important;
+  }
+  .thermal-receipt-table th {
+    border-bottom: 1px dashed #000 !important;
+  }
+  .thermal-receipt-table tr:not(:last-child) td {
+    border-bottom: 1px dotted #ccc !important;
   }
 
   .thermal-receipt-socials {
@@ -1717,6 +1846,267 @@ input[type=number] {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 16px;
+}
+
+/* Danger Zone: Factory Reset */
+.backup-danger-zone {
+  margin-top: 28px;
+}
+
+.backup-danger-card {
+  border: 2px dashed #f87171;
+  background: linear-gradient(135deg, #fff5f5 0%, #fef2f2 100%);
+  border-radius: 12px;
+  padding: 20px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  box-shadow: 0 2px 10px rgba(220, 38, 38, 0.06);
+}
+
+.backup-danger-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.backup-danger-icon {
+  font-size: 34px;
+  color: #dc2626;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.backup-danger-text h3 {
+  margin: 0 0 6px;
+  font-size: 16.5px;
+  font-weight: 800;
+  color: #991b1b;
+}
+
+.backup-danger-text p {
+  margin: 0;
+  font-size: 13px;
+  color: #7f1d1d;
+  line-height: 1.5;
+}
+
+.backup-danger-tag {
+  display: inline-block;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 20px;
+  margin-bottom: 6px;
+  border: 1px solid #fecaca;
+}
+
+.backup-danger-action {
+  flex-shrink: 0;
+}
+
+.factory-reset-btn {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  border: none !important;
+  padding: 12px 20px !important;
+  border-radius: 8px !important;
+  font-weight: 800 !important;
+  font-size: 14px !important;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.25);
+}
+
+.factory-reset-btn:hover {
+  background: #b91c1c !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.35);
+}
+
+/* Factory Reset Dialog Modal */
+.factory-reset-dialog {
+  max-width: 580px;
+  border-top: 5px solid #dc2626;
+}
+
+.factory-reset-header h2 {
+  color: #991b1b;
+}
+
+.factory-reset-badge {
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
+  border: 1px solid #fecaca !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.factory-reset-consequences {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 14px 0 16px;
+  font-size: 12.5px;
+}
+
+.factory-reset-consequences h4 {
+  margin: 0 0 10px;
+  color: #991b1b;
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.factory-reset-consequences ul {
+  margin: 0;
+  padding-right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #7f1d1d;
+  line-height: 1.5;
+}
+
+.factory-reset-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.reset-option-label {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 12px !important;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.reset-option-label:hover {
+  background: #f3f4f6;
+}
+
+.reset-option-label input[type="checkbox"] {
+  margin-top: 3px !important;
+  width: 18px !important;
+  height: 18px !important;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.reset-option-label div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reset-option-label strong {
+  font-size: 13px;
+  color: #1f2937;
+}
+
+.reset-option-label span {
+  font-size: 11.5px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.reset-option-danger {
+  background: #fff5f5;
+  border-color: #fecaca;
+}
+
+.reset-option-danger:hover {
+  background: #fee2e2;
+}
+
+.reset-option-danger strong {
+  color: #991b1b;
+}
+
+.reset-option-danger span {
+  color: #b91c1c;
+}
+
+.factory-reset-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.factory-reset-inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.confirm-keyword {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 800;
+  border: 1px solid #fecaca;
+  user-select: all;
+}
+
+.reset-confirm-input,
+.reset-password-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13.5px;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.reset-confirm-input:focus,
+.reset-password-input:focus {
+  border-color: #ef4444;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+}
+
+.factory-reset-confirm-btn {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  padding: 10px 22px !important;
+  border: none !important;
+  border-radius: 8px !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.factory-reset-confirm-btn:hover:not(:disabled) {
+  background: #b91c1c !important;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3);
+}
+
+.factory-reset-confirm-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .checks {

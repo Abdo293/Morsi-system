@@ -1,4 +1,5 @@
 mod storage;
+mod printer;
 use tauri::Manager;
 
 fn startup_log_dir() -> std::path::PathBuf {
@@ -107,6 +108,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            printer::get_default_receipt_printer,
+            printer::list_receipt_printers,
+            printer::pulse_cash_drawer,
             storage::setup_required,
             storage::bootstrap_admin,
             storage::list_login_users,
@@ -187,6 +191,7 @@ pub fn run() {
             storage::export_backup_file,
             storage::save_backup_settings,
             storage::open_backups_directory,
+            storage::factory_reset_system,
         ])
         .build(tauri::generate_context!())
         .map(|app| {

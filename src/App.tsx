@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   LuLayoutDashboard,
@@ -33,10 +33,12 @@ import {
   LuDownload,
   LuUpload,
   LuFolderOpen,
+  LuTriangleAlert,
 } from "react-icons/lu";
 import { BrandSelect, type SelectOption } from "./components/BrandSelect";
 import { BrandCreatableSelect } from "./components/BrandCreatableSelect";
 import { FaFacebook, FaTiktok } from "react-icons/fa";
+import { createPortal } from "react-dom";
 import "./App.css";
 
 type Session = { token: string; userId?: number; full_name: string; role: "ADMIN" | "SELLER"; permissions?: string[] };
@@ -69,6 +71,7 @@ type PeriodSummary = {
   refundsPiasters: number;
   refundsCount: number;
   netSalesPiasters: number;
+  profitPiasters: number;
   collectedPiasters: number;
   creditSalesPiasters: number;
   debtCollectedPiasters: number;
@@ -1561,6 +1564,7 @@ function Home({
       refundsPiasters: dashboard?.todayRefundsPiasters ?? 0,
       refundsCount: dashboard?.todayRefundsCount ?? 0,
       netSalesPiasters: dashboard?.todayNetSalesPiasters ?? 0,
+      profitPiasters: 0,
       collectedPiasters: dashboard?.todayCollectedPiasters ?? 0,
       creditSalesPiasters: dashboard?.todayCreditSalesPiasters ?? 0,
       debtCollectedPiasters: dashboard?.todayDebtCollectedPiasters ?? 0,
@@ -1573,8 +1577,8 @@ function Home({
   const activeRefundsCount = currentSummary.refundsCount;
   const activeNet = currentSummary.netSalesPiasters;
   const activeCollected = currentSummary.collectedPiasters;
+  const activeProfit = currentSummary.profitPiasters;
   const activeCredit = currentSummary.creditSalesPiasters;
-  const activeDebtCollected = currentSummary.debtCollectedPiasters;
   const activeInvoicesCount = currentSummary.invoicesCount;
 
   const periodMeta = useMemo(() => {
@@ -1585,7 +1589,7 @@ function Home({
           subtitle: "«آخر ٧ أيام»",
           badge: "آخر ٧ أيام",
           netSalesLabel: "صافي مبيعات الأسبوع",
-          collectedLabel: "المبلغ المحصّل خلال الأسبوع",
+          profitLabel: "ربح الأسبوع",
           invoicesLabel: "فواتير الأسبوع",
           creditLabel: "آجل الأسبوع والمرتجعات",
           creditSubLabel: "مبيعات آجلة للأسبوع:",
@@ -1596,7 +1600,7 @@ function Home({
           subtitle: "«الشهر الحالي»",
           badge: "الشهر الحالي",
           netSalesLabel: "صافي مبيعات الشهر",
-          collectedLabel: "المبلغ المحصّل خلال الشهر",
+          profitLabel: "ربح الشهر",
           invoicesLabel: "فواتير الشهر",
           creditLabel: "آجل الشهر والمرتجعات",
           creditSubLabel: "مبيعات آجلة للشهر:",
@@ -1607,7 +1611,7 @@ function Home({
           subtitle: "«طول الوقت»",
           badge: "طول الوقت",
           netSalesLabel: "إجمالي صافي المبيعات",
-          collectedLabel: "إجمالي المبالغ المحصّلة",
+          profitLabel: "إجمالي الربح",
           invoicesLabel: "إجمالي عدد الفواتير",
           creditLabel: "إجمالي الآجل والمرتجعات",
           creditSubLabel: "إجمالي مبيعات آجلة:",
@@ -1619,7 +1623,7 @@ function Home({
           subtitle: "«اليوم ماشي إزاي؟»",
           badge: "اليوم",
           netSalesLabel: "صافي مبيعات اليوم",
-          collectedLabel: "المبلغ المحصّل اليوم",
+          profitLabel: "ربح اليوم",
           invoicesLabel: "فواتير اليوم",
           creditLabel: "آجل اليوم والمرتجعات",
           creditSubLabel: "مبيعات آجلة لليوم:",
@@ -1914,7 +1918,7 @@ function Home({
             </div>
           </div>
 
-          {/* Card 2: Actual Collected Liquid */}
+          {/* Card 2: Profit after discounts, returns and cost of goods */}
           <div style={{
             background: "#fff",
             border: "1px solid #bfdbfe",
@@ -1926,19 +1930,16 @@ function Home({
             gap: "8px",
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: "12px", fontWeight: 700, color: "#1e40af" }}>{periodMeta.collectedLabel}</span>
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "#1e40af" }}>{periodMeta.profitLabel}</span>
               <span style={{ background: "#dbeafe", color: "#1d4ed8", fontSize: "10px", fontWeight: 800, padding: "2px 6px", borderRadius: "6px" }}>
-                السيولة الداخلة ({periodMeta.badge})
+                بعد تكلفة البضاعة ({periodMeta.badge})
               </span>
             </div>
-            <div style={{ fontSize: "24px", fontWeight: 900, color: "#1e3a8a" }}>
-              {money(activeCollected)}
+            <div style={{ fontSize: "24px", fontWeight: 900, color: activeProfit < 0 ? "#b91c1c" : "#1e3a8a" }}>
+              {money(activeProfit)}
             </div>
             <div style={{ fontSize: "11px", color: "#4b5563", borderTop: "1px solid #f3f4f6", paddingTop: "6px", display: "flex", justifyContent: "space-between" }}>
-              <span>نقد ومحافظ من الفواتير</span>
-              <span style={{ color: activeDebtCollected > 0 ? "#15803d" : undefined }}>
-                {activeDebtCollected > 0 ? `+${money(activeDebtCollected)} سداد ديون` : "لا توجد دفعات ديون"}
-              </span>
+              <span>بعد الخصومات والمرتجعات وتكلفة القطع، وقبل مصاريف المحل</span>
             </div>
           </div>
 
@@ -11083,6 +11084,74 @@ function ThermalReceiptModal({
   onNewSale?: () => void;
 }) {
   const [paperSize, setPaperSize] = useState<"80mm" | "58mm">("80mm");
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const pageStyleRef = useRef<HTMLStyleElement>(null);
+  const drawerPrintPending = useRef(false);
+  const [drawerPrinter, setDrawerPrinter] = useState(() => localStorage.getItem("morsi.drawerPrinter") || "");
+  const [printerNames, setPrinterNames] = useState<string[]>([]);
+  const [drawerPin, setDrawerPin] = useState<0 | 1>(() => localStorage.getItem("morsi.drawerPin") === "1" ? 1 : 0);
+  const [autoOpenDrawer, setAutoOpenDrawer] = useState(() => localStorage.getItem("morsi.autoOpenDrawer") !== "false");
+  const [drawerNotice, setDrawerNotice] = useState("");
+
+  useEffect(() => {
+    void Promise.all([
+      invoke<string>("get_default_receipt_printer").catch(() => ""),
+      invoke<string[]>("list_receipt_printers").catch(() => []),
+    ]).then(([defaultPrinter, installedPrinters]) => {
+      setPrinterNames(installedPrinters);
+      setDrawerPrinter((current) => current || installedPrinters.find((name) => /xprinter|xp-d200n/i.test(name)) || defaultPrinter);
+    });
+  }, []);
+
+  const openDrawer = useCallback(async () => {
+    try {
+      await invoke("pulse_cash_drawer", { printerName: drawerPrinter.trim(), pin: drawerPin });
+      setDrawerNotice("تم إرسال أمر فتح الدرج للطابعة");
+    } catch (error) {
+      setDrawerNotice(`تعذر فتح الدرج: ${String(error)}`);
+    }
+  }, [drawerPrinter, drawerPin]);
+
+  useEffect(() => {
+    const afterPrint = () => {
+      if (!drawerPrintPending.current) return;
+      drawerPrintPending.current = false;
+      if (autoOpenDrawer) void openDrawer();
+    };
+    window.addEventListener("afterprint", afterPrint);
+    return () => window.removeEventListener("afterprint", afterPrint);
+  }, [autoOpenDrawer, openDrawer]);
+
+  const updatePrintPageSize = useCallback(() => {
+    const receipt = receiptRef.current;
+    const style = pageStyleRef.current;
+    if (!receipt || !style) return;
+    const previousMaxHeight = receipt.style.maxHeight;
+    const previousOverflow = receipt.style.overflow;
+    receipt.style.maxHeight = "none";
+    receipt.style.overflow = "visible";
+    const contentHeightPx = receipt.getBoundingClientRect().height;
+    receipt.style.maxHeight = previousMaxHeight;
+    receipt.style.overflow = previousOverflow;
+    const heightMm = Math.max(50, Math.ceil(contentHeightPx * 25.4 / 96 + 6));
+    style.textContent = `@page { size: ${paperSize} ${heightMm}mm; margin: 0; } @media print { #root { display: none !important; } }`;
+  }, [paperSize]);
+
+  useLayoutEffect(() => {
+    updatePrintPageSize();
+    void document.fonts.ready.then(updatePrintPageSize);
+    const logo = receiptRef.current?.querySelector("img");
+    logo?.addEventListener("load", updatePrintPageSize);
+    return () => logo?.removeEventListener("load", updatePrintPageSize);
+  }, [updatePrintPageSize]);
+
+  const printReceipt = useCallback(async () => {
+    await document.fonts.ready;
+    await receiptRef.current?.querySelector("img")?.decode().catch(() => undefined);
+    updatePrintPageSize();
+    drawerPrintPending.current = true;
+    window.print();
+  }, [updatePrintPageSize]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -11091,16 +11160,19 @@ function ThermalReceiptModal({
         onClose();
       } else if (e.key === "Enter") {
         e.preventDefault();
-        window.print();
+        void printReceipt();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [onClose, printReceipt]);
 
   const totalItemsCount = invoiceDetail.items.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
+    <>
+      {createPortal(<style ref={pageStyleRef} />, document.head)}
+      {createPortal(
     <div
       className="thermal-receipt-overlay"
       onMouseDown={(e) => {
@@ -11140,7 +11212,7 @@ function ThermalReceiptModal({
                 alignItems: "center",
                 gap: "6px",
               }}
-              onClick={() => window.print()}
+              onClick={() => void printReceipt()}
             >
               <LuPrinter /> طباعة الفاتورة (Enter)
             </button>
@@ -11155,8 +11227,51 @@ function ThermalReceiptModal({
           </div>
         </div>
 
+        <div className="thermal-drawer-controls print-hide">
+          <label className="thermal-drawer-auto">
+            <input
+              type="checkbox"
+              checked={autoOpenDrawer}
+              onChange={(event) => {
+                setAutoOpenDrawer(event.target.checked);
+                localStorage.setItem("morsi.autoOpenDrawer", String(event.target.checked));
+              }}
+            />
+            فتح الدرج بعد طباعة الفاتورة
+          </label>
+          <input
+            aria-label="اسم طابعة الدرج في ويندوز"
+            list="receipt-printer-names"
+            placeholder="اسم طابعة Xprinter في ويندوز"
+            value={drawerPrinter}
+            onChange={(event) => {
+              setDrawerPrinter(event.target.value);
+              localStorage.setItem("morsi.drawerPrinter", event.target.value);
+            }}
+          />
+          <datalist id="receipt-printer-names">
+            {printerNames.map((name) => <option key={name} value={name} />)}
+          </datalist>
+          <select
+            aria-label="منفذ الدرج"
+            value={drawerPin}
+            onChange={(event) => {
+              const pin = Number(event.target.value) as 0 | 1;
+              setDrawerPin(pin);
+              localStorage.setItem("morsi.drawerPin", String(pin));
+            }}
+          >
+            <option value={0}>منفذ 2</option>
+            <option value={1}>منفذ 5</option>
+          </select>
+          <button type="button" className="secondary" onClick={() => void openDrawer()} disabled={!drawerPrinter.trim()}>
+            تجربة فتح الدرج
+          </button>
+          {drawerNotice && <small role="status">{drawerNotice}</small>}
+        </div>
+
         {/* The Receipt Strip */}
-        <div className={`thermal-receipt-card width-${paperSize}`}>
+        <div ref={receiptRef} className={`thermal-receipt-card width-${paperSize}`}>
           {/* Header */}
           <div className="thermal-receipt-header">
             <img
@@ -11391,7 +11506,10 @@ function ThermalReceiptModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
+      )}
+    </>
   );
 }
 
@@ -11981,6 +12099,7 @@ function PreviewBarcodeModal({
   const [showLocation, setShowLocation] = useState(true);
   const [showPrice, setShowPrice] = useState(true);
   const [labelSize, setLabelSize] = useState<"standard" | "compact" | "large">("standard");
+  const paperSize = labelSize === "compact" ? "40mm 25mm" : labelSize === "large" ? "60mm 40mm" : "50mm 30mm";
 
   const stickersToPrint: BarcodePrintItem[] = [];
   for (const item of queue) {
@@ -11990,7 +12109,10 @@ function PreviewBarcodeModal({
   }
 
   return (
-    <div className="variant-picker-overlay" style={{ zIndex: 4000 }}>
+    <>
+      {createPortal(<style>{`@page { size: ${paperSize}; margin: 0; } @media print { #root { display: none !important; } }`}</style>, document.head)}
+      {createPortal(
+    <div className="variant-picker-overlay barcode-print-overlay" style={{ zIndex: 4000 }}>
       <section
         className="invoice-details-dialog barcode-print-modal-only"
         style={{ width: "95vw", maxWidth: "1100px", maxHeight: "92vh", padding: "28px" }}
@@ -12069,7 +12191,7 @@ function PreviewBarcodeModal({
           </div>
         </div>
 
-        <div style={{ margin: "16px 0", maxHeight: "60vh", overflowY: "auto" }}>
+        <div className="barcode-print-content" style={{ margin: "16px 0", maxHeight: "60vh", overflowY: "auto" }}>
           <div className="barcode-stickers-grid">
             {stickersToPrint.map((item, idx) => {
               const code = item.barcode || `P${item.productId}`;
@@ -12136,7 +12258,10 @@ function PreviewBarcodeModal({
           </div>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
+      )}
+    </>
   );
 }
 
@@ -16618,6 +16743,16 @@ function BackupManagement({
   const [restoring, setRestoring] = useState(false);
   const [restoreSuccessMsg, setRestoreSuccessMsg] = useState("");
 
+  // Factory Reset Modal
+  const [factoryResetOpen, setFactoryResetOpen] = useState(false);
+  const [confirmPhrase, setConfirmPhrase] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [saveSafetyBackup, setSaveSafetyBackup] = useState(true);
+  const [clearAllBackups, setClearAllBackups] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetSuccessMsg, setResetSuccessMsg] = useState("");
+  const [resetErrorMsg, setResetErrorMsg] = useState("");
+
   // External Import State
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importNote, setImportNote] = useState("");
@@ -16765,6 +16900,33 @@ function BackupManagement({
     } catch (err) {
       setError(String(err));
       setRestoring(false);
+    }
+  }
+
+  async function handleExecuteFactoryReset() {
+    if (confirmPhrase.trim() !== "فورمات شامل") {
+      setResetErrorMsg("يرجى كتابة كلمة التأكيد \"فورمات شامل\" بدقة للمتابعة");
+      return;
+    }
+    if (!adminPassword.trim()) {
+      setResetErrorMsg("يرجى إدخال كلمة مرور حساب المدير (Admin)");
+      return;
+    }
+    try {
+      setResetting(true);
+      setResetErrorMsg("");
+      const res = await invoke<string>("factory_reset_system", {
+        token: session.token,
+        password: adminPassword,
+        createSafetyBackup: saveSafetyBackup,
+        clearBackups: clearAllBackups,
+      });
+      localStorage.clear();
+      sessionStorage.clear();
+      setResetSuccessMsg(res);
+    } catch (err) {
+      setResetErrorMsg(String(err));
+      setResetting(false);
     }
   }
 
@@ -17133,6 +17295,43 @@ function BackupManagement({
         </div>
       </div>
 
+      {/* Danger Zone: Factory Reset (Admin Only) */}
+      {session.role === "ADMIN" && (
+        <div className="backup-danger-zone">
+          <div className="backup-danger-card">
+            <div className="backup-danger-content">
+              <div className="backup-danger-icon">
+                <LuTriangleAlert />
+              </div>
+              <div className="backup-danger-text">
+                <div className="backup-danger-tag">منطقة الخطر الشديد • إجراء لا يمكن الرجوع عنه</div>
+                <h3>إعادة ضبط المصنع وفورمات كامل للنظام (Factory Reset)</h3>
+                <p>
+                  مسح شامل لجميع البيانات (المنتجات، المخازن، الفواتير، العملاء، الموردين، والموظفين) وإعادة النظام كما ولدته أمه إلى وضع التثبيت الأول تماماً.
+                </p>
+              </div>
+            </div>
+            <div className="backup-danger-action">
+              <button
+                type="button"
+                className="danger factory-reset-btn"
+                onClick={() => {
+                  setConfirmPhrase("");
+                  setAdminPassword("");
+                  setSaveSafetyBackup(true);
+                  setClearAllBackups(false);
+                  setResetErrorMsg("");
+                  setResetSuccessMsg("");
+                  setFactoryResetOpen(true);
+                }}
+              >
+                <LuTrash2 /> فورمات كامل للسيستم وضبط المصنع
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Safety Restore Modal */}
       {restoreModalItem && (
         <div className="backup-restore-overlay" onClick={() => !restoring && setRestoreModalItem(null)}>
@@ -17201,6 +17400,119 @@ function BackupManagement({
                 style={{ padding: "10px 20px", fontWeight: 700 }}
               >
                 {restoring ? "جارٍ أخذ لقطة الأمان واستعادة البيانات... ⏳" : "تأكيد واستعادة هذه النسخة الآن ⚠️"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Factory Reset Modal */}
+      {factoryResetOpen && (
+        <div className="backup-restore-overlay" onClick={() => !resetting && setFactoryResetOpen(false)}>
+          <div className="backup-restore-dialog factory-reset-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="backup-restore-header factory-reset-header">
+              <div className="restore-alert-badge factory-reset-badge">
+                <LuTriangleAlert /> تحذير شديد الخطورة • مسح شامل
+              </div>
+              <h2>فورمات كامل وإعادة ضبط المصنع للنظام</h2>
+              <p>هذا الإجراء سيقوم بإرجاع السيستم تماماً كأول يوم تم تثبيته فيه ("كما ولدته أمه")</p>
+            </div>
+
+            <div className="factory-reset-consequences">
+              <h4>⚠️ ماذا سيحدث عند تنفيذ هذه العملية؟</h4>
+              <ul>
+                <li>🗑️ <strong>مسح كافة المنتجات والأصناف:</strong> الباركودات، المقاسات، الألوان، وأرصدة المخازن بالكامل.</li>
+                <li>🧾 <strong>مسح سجل المبيعات والفواتير:</strong> جميع الفواتير الصادرة، المرتجعات، وطلبات الأونلاين وتقارير الجرد.</li>
+                <li>👥 <strong>مسح حسابات العملاء والموردين:</strong> كشوف الحسابات السابقة، المديونيات، وسجلات التحصيل والدفع.</li>
+                <li>👔 <strong>مسح الموظفين وسجلات العمل:</strong> الحضور والانصراف، السلف، المكافآت، الخصومات، والرواتب.</li>
+                <li>🔄 <strong>تسجيل الخروج وإعادة التشغيل:</strong> سيتم إغلاق التطبيق وإعادة فتحه على شاشة تهيئة النظام الأولى لإنشاء حساب المدير الجديد من الصفر.</li>
+              </ul>
+            </div>
+
+            <div className="factory-reset-options">
+              <label className="checkbox-label reset-option-label">
+                <input
+                  type="checkbox"
+                  checked={saveSafetyBackup}
+                  onChange={(e) => setSaveSafetyBackup(e.target.checked)}
+                  disabled={resetting}
+                />
+                <div>
+                  <strong>🛡️ أخذ نسخة أمان تلقائية (Safety Backup) قبل المسح (موصى به بشدة)</strong>
+                  <span>حفظ نسخة كاملة من بياناتك الحالية داخل مجلد النسخ الاحتياطية على جهازك للرجوع إليها في أي وقت مستقبلاً.</span>
+                </div>
+              </label>
+
+              <label className="checkbox-label reset-option-label reset-option-danger">
+                <input
+                  type="checkbox"
+                  checked={clearAllBackups}
+                  onChange={(e) => setClearAllBackups(e.target.checked)}
+                  disabled={resetting}
+                />
+                <div>
+                  <strong>🗑️ مسح مجلد النسخ الاحتياطية السابقة أيضاً من القرص</strong>
+                  <span>حذف كافة ملفات النسخ المحفوظة على جهازك نهائياً (تنظيف 100% للجهاز في حال رغبتك ببيعه أو نقله).</span>
+                </div>
+              </label>
+            </div>
+
+            <div className="factory-reset-inputs">
+              <label>
+                <span>1. اكتب عبارة <code className="confirm-keyword">فورمات شامل</code> في المربع أدناه للمتابعة:</span>
+                <input
+                  type="text"
+                  placeholder="اكتب هنا: فورمات شامل"
+                  value={confirmPhrase}
+                  onChange={(e) => setConfirmPhrase(e.target.value)}
+                  disabled={resetting}
+                  className="reset-confirm-input"
+                  dir="rtl"
+                />
+              </label>
+
+              <label>
+                <span>2. أدخل كلمة مرور حساب المدير (Admin) لتأكيد هويتك وأمان العملية:</span>
+                <input
+                  type="password"
+                  placeholder="كلمة مرور المدير الحالية..."
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  disabled={resetting}
+                  className="reset-password-input"
+                  dir="ltr"
+                />
+              </label>
+            </div>
+
+            {resetErrorMsg && (
+              <div className="message error" role="alert" style={{ margin: "10px 0" }}>
+                ❌ {resetErrorMsg}
+              </div>
+            )}
+
+            {resetSuccessMsg && (
+              <div className="message success" role="status" style={{ margin: "10px 0" }}>
+                ✅ {resetSuccessMsg}
+              </div>
+            )}
+
+            <div className="backup-restore-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setFactoryResetOpen(false)}
+                disabled={resetting}
+              >
+                إلغاء والتراجع بأمان
+              </button>
+              <button
+                type="button"
+                className="danger factory-reset-confirm-btn"
+                onClick={() => void handleExecuteFactoryReset()}
+                disabled={resetting || confirmPhrase.trim() !== "فورمات شامل" || !adminPassword.trim()}
+              >
+                {resetting ? "جارٍ المسح وإعادة ضبط المصنع... ⏳" : "💥 تأكيد المسح وفورمات النظام بالكامل"}
               </button>
             </div>
           </div>
