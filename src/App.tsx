@@ -2,6 +2,11 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormE
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { toCanvas } from "html-to-image";
 import {
+  printReceiptHtml,
+  printReportHtml,
+  printBarcodeStickersHtml,
+} from "./utils/printHelper";
+import {
   LuLayoutDashboard,
   LuShoppingCart,
   LuReceipt,
@@ -11115,81 +11120,15 @@ function thermalPixels(canvas: HTMLCanvasElement): { widthBytes: number; height:
 }
 
 async function printDocumentFromPage(key: string, title: string): Promise<void> {
-  if (!isTauri()) {
-    window.alert("طباعة المستندات متاحة من داخل نسخة البرنامج المثبتة على ويندوز");
-    return;
-  }
   const original = document.querySelector<HTMLElement>(`[data-print-document="${key}"]`);
   if (!original) {
     window.alert("تعذر العثور على محتوى المستند المطلوب طباعته");
     return;
   }
-
-  const holder = document.createElement("div");
-  holder.style.cssText = "position:fixed;left:-10000px;top:0;width:750px;background:#fff;color:#000;direction:rtl;z-index:-1";
-  const clone = original.cloneNode(true) as HTMLElement;
-  clone.style.width = "100%";
-  clone.style.maxWidth = "none";
-  clone.style.maxHeight = "none";
-  clone.style.overflow = "visible";
-  clone.style.boxShadow = "none";
-  clone.querySelectorAll(".print-hide, .variant-picker-overlay, button, input, select, textarea, .staff-filters").forEach((element) => element.remove());
-  clone.querySelectorAll<HTMLElement>(".print-only-header").forEach((element) => { element.style.display = "block"; });
-  clone.querySelectorAll<HTMLElement>(".table-wrap").forEach((element) => {
-    element.style.overflow = "visible";
-    element.style.maxHeight = "none";
-  });
-  if (!clone.querySelector(".print-only-header")) {
-    const heading = document.createElement("h1");
-    heading.textContent = title;
-    heading.style.cssText = "font:700 22px Cairo,Arial,sans-serif;text-align:center;margin:0 0 18px";
-    clone.prepend(heading);
-  }
-  holder.appendChild(clone);
-  document.body.appendChild(holder);
-
   try {
-    await document.fonts.ready;
-    const captureWidth = Math.min(2000, Math.max(750, holder.scrollWidth));
-    const holderTop = holder.getBoundingClientRect().top;
-    const rowStarts = Array.from(holder.querySelectorAll("tr"))
-      .map((row) => (row.getBoundingClientRect().top - holderTop) * 750 / captureWidth)
-      .sort((a, b) => a - b);
-    const source = await toCanvas(holder, {
-      backgroundColor: "#fff",
-      pixelRatio: 1,
-      width: captureWidth,
-      height: holder.scrollHeight,
-      style: { maxHeight: "none", overflow: "visible" },
-    });
-    const scaledHeight = Math.ceil(source.height * 750 / source.width);
-    const pageContentHeight = 1072;
-    const pages: { width: number; height: number; pixels: number[] }[] = [];
-    let start = 0;
-    while (start < scaledHeight) {
-      if (pages.length >= 100) throw new Error("التقرير أطول من الحد المسموح للطباعة");
-      const maxEnd = Math.min(start + pageContentHeight, scaledHeight);
-      const nextRow = rowStarts.filter((top) => top > start + pageContentHeight * 0.6 && top <= maxEnd).slice(-1)[0];
-      const end = maxEnd < scaledHeight && nextRow ? Math.floor(nextRow) : maxEnd;
-      const page = document.createElement("canvas");
-      page.width = 800;
-      page.height = 1132;
-      const context = page.getContext("2d");
-      if (!context) throw new Error("تعذر تجهيز صفحة التقرير");
-      context.fillStyle = "#fff";
-      context.fillRect(0, 0, page.width, page.height);
-      const sourceTop = start * source.width / 750;
-      const sourceHeight = (end - start) * source.width / 750;
-      context.drawImage(source, 0, sourceTop, source.width, sourceHeight, 25, 30, 750, end - start);
-      pages.push({ width: page.width, height: page.height, pixels: thermalPixels(page).pixels });
-      start = end;
-    }
-    const printerName = localStorage.getItem("morsi.documentPrinter")?.trim() || await invoke<string>("get_default_receipt_printer");
-    await invoke("print_document_pages", { printerName, pages });
+    await printReportHtml(original, title);
   } catch (error) {
     window.alert(`تعذرت طباعة ${title}: ${String(error)}`);
-  } finally {
-    holder.remove();
   }
 }
 
@@ -11229,44 +11168,75 @@ function ThermalReceiptModal({
     }
   }, [drawerPrinter, drawerPin]);
 
-  const printReceipt = useCallback(async () => {
+  const [printingDirect, setPrintingDirect] = useState(false);
+
+  const printReceiptPreview = useCallback(async () => {
+    if (!receiptRef.current) return;
+    try {
+      setDrawerNotice("");
+      await printReceiptHtml(receiptRef.current, paperSize);
+      if (autoOpenDrawer && isTauri() && drawerPrinter.trim()) {
+        void openDrawer();
+      }
+    } catch (error) {
+      setDrawerNotice(`تعذرت معاينة/طباعة الفاتورة: ${String(error)}`);
+    }
+  }, [paperSize, autoOpenDrawer, drawerPrinter, openDrawer]);
+
+  const printReceiptDirect = useCallback(async () => {
+    if (!receiptRef.current) return;
+    if (!isTauri()) {
+      // If outside desktop app, use isolated browser print preview directly
+      await printReceiptPreview();
+      return;
+    }
+    setPrintingDirect(true);
+    setDrawerNotice("");
     try {
       await document.fonts.ready;
-      await receiptRef.current?.querySelector("img")?.decode().catch(() => undefined);
-      if (!isTauri() || !receiptRef.current) {
-        throw new Error("الطباعة الحرارية متاحة من داخل نسخة البرنامج المثبتة على ويندوز");
-      }
+      await receiptRef.current.querySelector("img")?.decode().catch(() => undefined);
       const printerName = drawerPrinter.trim() || await invoke<string>("get_default_receipt_printer");
-      const receipt = await thermalCanvas(receiptRef.current, paperSize === "80mm" ? 560 : 368);
+      const targetWidth = paperSize === "80mm" ? 560 : 368;
+      const receipt = await thermalCanvas(receiptRef.current, targetWidth);
       await invoke("print_thermal_bitmap", {
         printerName,
         ...thermalPixels(receipt),
+        paperWidthMm: paperSize === "80mm" ? 80 : 58,
+        paperHeightMm: 0,
         cut: true,
         drawerPin: autoOpenDrawer ? drawerPin : null,
       });
-      setDrawerNotice(autoOpenDrawer ? "تمت طباعة الفاتورة وإرسال أمر فتح الدرج" : "تمت طباعة الفاتورة");
+      setDrawerNotice(autoOpenDrawer ? "تمت طباعة الفاتورة وإرسال أمر فتح الدرج بنجاح" : "تمت طباعة الفاتورة بنجاح");
     } catch (error) {
-      setDrawerNotice(`تعذرت الطباعة أو فتح الدرج: ${String(error)}`);
+      console.warn("Direct thermal print error, opening preview print fallback:", error);
+      setDrawerNotice(`تعذرت الطباعة المباشرة (${String(error)}) - جارٍ فتح معاينة الطباعة...`);
+      try {
+        await printReceiptPreview();
+      } catch (previewErr) {
+        setDrawerNotice(`تعذرت طباعة الفاتورة: ${String(previewErr)}`);
+      }
+    } finally {
+      setPrintingDirect(false);
     }
-  }, [paperSize, drawerPrinter, drawerPin, autoOpenDrawer]);
+  }, [paperSize, drawerPrinter, drawerPin, autoOpenDrawer, printReceiptPreview]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
         e.preventDefault();
         e.stopImmediatePropagation();
-        void printReceipt();
+        void printReceiptPreview();
       } else if (e.key === "Escape") {
         e.preventDefault();
         onClose();
       } else if (e.key === "Enter") {
         e.preventDefault();
-        void printReceipt();
+        void printReceiptDirect();
       }
     }
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose, printReceipt]);
+  }, [onClose, printReceiptDirect, printReceiptPreview]);
 
   const totalItemsCount = invoiceDetail.items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -11300,7 +11270,7 @@ function ThermalReceiptModal({
             </button>
           </div>
 
-          <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
             <button
               type="button"
               className="primary"
@@ -11311,10 +11281,27 @@ function ThermalReceiptModal({
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "6px",
+                fontWeight: "bold",
               }}
-              onClick={() => void printReceipt()}
+              onClick={() => void printReceiptDirect()}
+              disabled={printingDirect}
+              title="طباعة حرارية مباشرة وسريعة (Enter)"
             >
-              <LuPrinter /> طباعة الفاتورة (Enter)
+              <LuPrinter /> {printingDirect ? "جارٍ الطباعة..." : "طباعة سريعة (Enter)"}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              style={{
+                padding: "8px 14px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+              onClick={() => void printReceiptPreview()}
+              title="معاينة وطباعة ويندوز أو حفظ كـ PDF (Ctrl+P)"
+            >
+              <LuEye /> معاينة وطباعة ويندوز (Ctrl+P)
             </button>
             <button
               type="button"
@@ -12233,18 +12220,32 @@ function PreviewBarcodeModal({
     }
   }
 
-  const printLabels = async () => {
+  const printLabelsPreview = async () => {
+    if (!labelsRef.current) return;
+    try {
+      setPrintNotice("");
+      await printBarcodeStickersHtml(labelsRef.current, labelSize);
+    } catch (error) {
+      setPrintNotice(`تعذرت معاينة/طباعة الملصقات: ${String(error)}`);
+    }
+  };
+
+  const printLabelsDirect = async () => {
+    if (!labelsRef.current) return;
     if (!isTauri()) {
-      setPrintNotice("الطباعة الحرارية متاحة من داخل نسخة البرنامج المثبتة على ويندوز");
+      await printLabelsPreview();
       return;
     }
     setPrinting(true);
     setPrintNotice("");
     try {
       const printerName = barcodePrinter.trim() || await invoke<string>("get_default_receipt_printer");
-      const labels = Array.from(labelsRef.current?.querySelectorAll<HTMLElement>(".barcode-label-card") || []);
+      const labels = Array.from(labelsRef.current.querySelectorAll<HTMLElement>(".barcode-label-card"));
       const labelWidth = labelSize === "compact" ? 320 : labelSize === "large" ? 480 : 400;
       const labelHeight = labelSize === "compact" ? 200 : labelSize === "large" ? 320 : 240;
+      const paperW = labelSize === "compact" ? 40 : labelSize === "standard" ? 50 : 60;
+      const paperH = labelSize === "compact" ? 25 : labelSize === "standard" ? 30 : 40;
+
       for (let offset = 0; offset < labels.length; offset += 20) {
         const batch = labels.slice(offset, offset + 20);
         const page = document.createElement("canvas");
@@ -12261,13 +12262,21 @@ function PreviewBarcodeModal({
         await invoke("print_thermal_bitmap", {
           printerName,
           ...thermalPixels(page),
+          paperWidthMm: paperW,
+          paperHeightMm: paperH,
           cut: false,
           drawerPin: null,
         });
       }
-      setPrintNotice(`تم إرسال ${labels.length} ملصق للطابعة`);
+      setPrintNotice(`تم إرسال ${labels.length} ملصق للطابعة بنجاح`);
     } catch (error) {
-      setPrintNotice(`تعذرت طباعة الملصقات: ${String(error)}`);
+      console.warn("Direct barcode print error, fallback to preview:", error);
+      setPrintNotice(`تعذرت الطباعة المباشرة (${String(error)}) - جارٍ فتح معاينة الطباعة...`);
+      try {
+        await printLabelsPreview();
+      } catch (previewErr) {
+        setPrintNotice(`تعذرت طباعة الملصقات: ${String(previewErr)}`);
+      }
     } finally {
       setPrinting(false);
     }
@@ -12278,7 +12287,11 @@ function PreviewBarcodeModal({
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
         event.preventDefault();
         event.stopImmediatePropagation();
-        void printLabels();
+        void printLabelsPreview();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void printLabelsDirect();
       }
     };
     window.addEventListener("keydown", handlePrintShortcut, true);
@@ -12437,17 +12450,27 @@ function PreviewBarcodeModal({
             <datalist id="barcode-printer-names">
               {printerNames.map((name) => <option key={name} value={name} />)}
             </datalist>
-            <button type="button" className="secondary" onClick={onClose}>
-              إغلاق
-            </button>
             <button
               type="button"
               className="primary"
-              style={{ background: "#24742c", borderColor: "#24742c", padding: "10px 22px", fontSize: "15px", fontWeight: "bold" }}
-              onClick={() => void printLabels()}
+              style={{ background: "#24742c", borderColor: "#24742c", padding: "10px 20px", fontSize: "14px", fontWeight: "bold" }}
+              onClick={() => void printLabelsDirect()}
               disabled={printing}
+              title="طباعة حرارية مباشرة وسريعة لطابعة الباركود (Enter)"
             >
-              {printing ? "جارٍ إرسال الملصقات..." : "طباعة الآن (إلى طابعة الباركود)"} 🖨️
+              {printing ? "جارٍ إرسال الملصقات..." : "طباعة سريعة مباشرة"} 🖨️
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              style={{ padding: "10px 18px", fontSize: "14px", fontWeight: 700 }}
+              onClick={() => void printLabelsPreview()}
+              title="معاينة وطباعة ويندوز (Ctrl+P)"
+            >
+              معاينة وطباعة ويندوز 🖨️
+            </button>
+            <button type="button" className="secondary" onClick={onClose}>
+              إغلاق
             </button>
           </div>
         </div>

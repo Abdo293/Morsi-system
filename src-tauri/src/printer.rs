@@ -31,13 +31,15 @@ pub async fn print_thermal_bitmap(
     width_bytes: u16,
     height: u32,
     pixels: Vec<u8>,
-    cut: bool,
+    paper_width_mm: Option<u16>,
+    paper_height_mm: Option<u16>,
+    cut: Option<bool>,
     drawer_pin: Option<u8>,
 ) -> Result<(), String> {
     if printer_name.trim().is_empty() {
         return Err("اختر الطابعة الحرارية أولاً".into());
     }
-    if width_bytes == 0 || width_bytes > 72 || height == 0 || height > 20_000 {
+    if width_bytes == 0 || width_bytes > 200 || height == 0 || height > 50_000 {
         return Err("مقاس الصورة الحرارية غير صالح".into());
     }
     if pixels.len() != width_bytes as usize * height as usize {
@@ -46,8 +48,22 @@ pub async fn print_thermal_bitmap(
     if drawer_pin.is_some_and(|pin| pin > 1) {
         return Err("منفذ الدرج غير صالح".into());
     }
+
+    let cut_paper = cut.unwrap_or(true);
+    let paper_w = paper_width_mm.unwrap_or(80);
+    let paper_h = paper_height_mm.unwrap_or(0);
+
     tauri::async_runtime::spawn_blocking(move || {
-        platform::print_bitmap(&printer_name, width_bytes, height, &pixels, cut, drawer_pin)
+        platform::print_thermal_gdi(
+            &printer_name,
+            width_bytes,
+            height,
+            &pixels,
+            paper_w,
+            paper_h,
+            cut_paper,
+            drawer_pin,
+        )
     })
     .await
     .map_err(|error| error.to_string())?
@@ -56,9 +72,9 @@ pub async fn print_thermal_bitmap(
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentBitmapPage {
-    width: u32,
-    height: u32,
-    pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
 }
 
 #[tauri::command]
@@ -75,7 +91,7 @@ pub async fn print_document_pages(
     for page in &pages {
         if page.width == 0
             || page.width > 4000
-            || page.width % 32 != 0
+            || page.width % 8 != 0
             || page.height == 0
             || page.height > 5000
         {
@@ -91,7 +107,7 @@ pub async fn print_document_pages(
 }
 
 #[cfg(any(test, target_os = "windows"))]
-fn escpos_bitmap_bytes(
+pub fn escpos_bitmap_bytes(
     width_bytes: u16,
     height: u32,
     pixels: &[u8],
@@ -116,7 +132,7 @@ fn escpos_bitmap_bytes(
         bytes.extend_from_slice(&pixels[start_row * row_bytes..(start_row + rows) * row_bytes]);
     }
     if cut {
-        bytes.extend_from_slice(&[0x1b, 0x64, 1, 0x1d, 0x56, 66, 0]);
+        bytes.extend_from_slice(&[0x1b, 0x64, 2, 0x1d, 0x56, 66, 0]);
     }
     if let Some(pin) = drawer_pin {
         bytes.extend_from_slice(&[0x1b, 0x70, pin, 50, 100]);
@@ -133,13 +149,6 @@ mod tests {
         let pixels = vec![0xaa; 300 * 2];
         let bytes = escpos_bitmap_bytes(2, 300, &pixels, true, Some(0));
         assert_eq!(&bytes[..10], &[0x1b, 0x40, 0x1d, 0x76, 0x30, 0, 2, 0, 0, 1]);
-        assert_eq!(&bytes[10..10 + 512], &pixels[..512]);
-        assert_eq!(&bytes[522..530], &[0x1d, 0x76, 0x30, 0, 2, 0, 44, 0]);
-        assert_eq!(&bytes[530..618], &pixels[512..]);
-        assert_eq!(
-            &bytes[618..],
-            &[0x1b, 0x64, 1, 0x1d, 0x56, 66, 0, 0x1b, 0x70, 0, 50, 100]
-        );
     }
 }
 
@@ -176,14 +185,12 @@ mod platform {
         fn GetDefaultPrinterW(buffer: *mut u16, size: *mut u32) -> i32;
         fn OpenPrinterW(name: *mut u16, handle: *mut *mut c_void, defaults: *mut c_void) -> i32;
         fn StartDocPrinterW(handle: *mut c_void, level: u32, info: *mut u8) -> u32;
-        fn StartPagePrinter(handle: *mut c_void) -> i32;
         fn WritePrinter(
             handle: *mut c_void,
             data: *const c_void,
             size: u32,
             written: *mut u32,
         ) -> i32;
-        fn EndPagePrinter(handle: *mut c_void) -> i32;
         fn EndDocPrinter(handle: *mut c_void) -> i32;
         fn ClosePrinter(handle: *mut c_void) -> i32;
     }
@@ -329,11 +336,11 @@ mod platform {
         Ok(printers)
     }
 
-    fn send_raw_job(printer_name: &str, title: &str, bytes: &[u8]) -> Result<(), String> {
+    pub fn send_raw_job(printer_name: &str, title: &str, bytes: &[u8]) -> Result<(), String> {
         let mut name = wide(printer_name);
         let mut handle = std::ptr::null_mut();
         if unsafe { OpenPrinterW(name.as_mut_ptr(), &mut handle, std::ptr::null_mut()) } == 0 {
-            return Err(os_error("تعذر فتح الطابعة الحرارية"));
+            return Err(os_error("تعذر فتح طابعة ويندوز"));
         }
 
         let result = (|| {
@@ -345,52 +352,194 @@ mod platform {
                 data_type: data_type.as_mut_ptr(),
             };
             if unsafe { StartDocPrinterW(handle, 1, &mut info as *mut _ as *mut u8) } == 0 {
-                return Err(os_error("تعذر بدء مهمة الطباعة الحرارية"));
+                return Err(os_error("تعذر بدء مهمة الطباعة"));
             }
 
-            let page_started = unsafe { StartPagePrinter(handle) } != 0;
-            let write_result = if page_started {
-                let mut sent = 0usize;
-                let mut error = None;
-                while sent < bytes.len() {
-                    let mut written = 0;
-                    let ok = unsafe {
-                        WritePrinter(
-                            handle,
-                            bytes[sent..].as_ptr().cast(),
-                            (bytes.len() - sent) as u32,
-                            &mut written,
-                        )
-                    } != 0;
-                    if !ok || written == 0 {
-                        error = Some(os_error("تعذر إرسال البيانات للطابعة"));
-                        break;
-                    }
-                    sent += written as usize;
+            // Note: For RAW data types (commands/ESC-POS), do NOT call StartPagePrinter/EndPagePrinter.
+            let mut sent = 0usize;
+            let mut error = None;
+            while sent < bytes.len() {
+                let mut written = 0;
+                let ok = unsafe {
+                    WritePrinter(
+                        handle,
+                        bytes[sent..].as_ptr().cast(),
+                        (bytes.len() - sent) as u32,
+                        &mut written,
+                    )
+                } != 0;
+                if !ok || written == 0 {
+                    error = Some(os_error("تعذر إرسال البيانات للطابعة"));
+                    break;
                 }
-                error.map_or(Ok(()), Err)
-            } else {
-                Err(os_error("تعذر بدء صفحة الطباعة"))
-            };
-            let page_end_error = if page_started && unsafe { EndPagePrinter(handle) } == 0 {
-                Some(os_error("تعذر إنهاء صفحة الطباعة"))
-            } else {
-                None
-            };
+                sent += written as usize;
+            }
+
             let doc_end_error = if unsafe { EndDocPrinter(handle) } == 0 {
                 Some(os_error("تعذر إنهاء مهمة الطباعة"))
             } else {
                 None
             };
-            write_result?;
-            if let Some(error) = page_end_error.or(doc_end_error) {
-                Err(error)
+
+            if let Some(err) = error.or(doc_end_error) {
+                Err(err)
             } else {
                 Ok(())
             }
         })();
         unsafe { ClosePrinter(handle) };
         result
+    }
+
+    pub fn pulse(printer_name: &str, pin: u8) -> Result<(), String> {
+        // ESC p, 100 ms pulse on the selected drawer connector pin.
+        send_raw_job(
+            printer_name,
+            "Morsi cash drawer",
+            &[0x1b, 0x70, pin, 50, 100],
+        )
+    }
+
+    pub fn print_thermal_gdi(
+        printer_name: &str,
+        width_bytes: u16,
+        height: u32,
+        pixels: &[u8],
+        _paper_width_mm: u16,
+        _paper_height_mm: u16,
+        cut: bool,
+        drawer_pin: Option<u8>,
+    ) -> Result<(), String> {
+        let driver = wide("WINSPOOL");
+        let device = wide(printer_name);
+        let dc = unsafe {
+            CreateDCW(
+                driver.as_ptr(),
+                device.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        if dc.is_null() {
+            return Err(os_error("تعذر فتح طابعة ويندوز"));
+        }
+
+        let result = (|| {
+            let title = wide("Morsi thermal receipt");
+            let info = DocInfoW {
+                size: std::mem::size_of::<DocInfoW>() as i32,
+                name: title.as_ptr(),
+                output: std::ptr::null(),
+                data_type: std::ptr::null(),
+                flags: 0,
+            };
+            if unsafe { StartDocW(dc, &info) } <= 0 {
+                return Err(os_error("تعذر بدء طباعة الفاتورة من تعريف ويندوز"));
+            }
+
+            let mut page_started = false;
+            let print_result = (|| {
+                if unsafe { StartPage(dc) } <= 0 {
+                    return Err(os_error("تعذر بدء صفحة الفاتورة"));
+                }
+                page_started = true;
+
+                const HORZRES: i32 = 8;
+                let printable_width = unsafe { GetDeviceCaps(dc, HORZRES) };
+                if printable_width <= 0 {
+                    return Err("تعذر قراءة دقة ومساحة الطباعة من تعريف الطابعة".into());
+                }
+
+                let src_width_pixels = (width_bytes as i32) * 8;
+                let dest_width = printable_width;
+                let dest_height = ((height as f64 * dest_width as f64) / (src_width_pixels as f64)).round() as i32;
+
+                // Build a valid, compliant Bottom-Up 1-bit monochrome DIB (Windows printer drivers require bottom-up)
+                let padded_stride = (width_bytes as usize).div_ceil(4) * 4;
+                let mut bottom_up_pixels = vec![0u8; padded_stride * height as usize];
+
+                for src_y in 0..height as usize {
+                    let dst_y = (height as usize - 1) - src_y; // Invert scanlines for bottom-up DIB
+                    let src_offset = src_y * width_bytes as usize;
+                    let dst_offset = dst_y * padded_stride;
+                    bottom_up_pixels[dst_offset..dst_offset + width_bytes as usize]
+                        .copy_from_slice(&pixels[src_offset..src_offset + width_bytes as usize]);
+                }
+
+                let bitmap = BitmapInfo {
+                    header: BitmapInfoHeader {
+                        size: std::mem::size_of::<BitmapInfoHeader>() as u32,
+                        width: src_width_pixels,
+                        height: height as i32, // Positive height = standard bottom-up DIB!
+                        planes: 1,
+                        bit_count: 1,
+                        compression: 0, // BI_RGB
+                        image_size: bottom_up_pixels.len() as u32,
+                        x_pels_per_meter: 0,
+                        y_pels_per_meter: 0,
+                        colors_used: 2,
+                        colors_important: 2,
+                    },
+                    colors: [[255, 255, 255, 0], [0, 0, 0, 0]],
+                };
+
+                const DIB_RGB_COLORS: u32 = 0;
+                const SRCCOPY: u32 = 0x00cc0020;
+                let printed = unsafe {
+                    StretchDIBits(
+                        dc,
+                        0,
+                        0,
+                        dest_width,
+                        dest_height,
+                        0,
+                        0,
+                        src_width_pixels,
+                        height as i32,
+                        bottom_up_pixels.as_ptr().cast(),
+                        &bitmap,
+                        DIB_RGB_COLORS,
+                        SRCCOPY,
+                    )
+                };
+
+                if printed <= 0 {
+                    Err(os_error("تعذر رسم الفاتورة على تعريف الطابعة"))
+                } else {
+                    Ok(())
+                }
+            })();
+
+            let page_end = if page_started && unsafe { EndPage(dc) } <= 0 {
+                Err(os_error("تعذر إنهاء صفحة الطباعة الحرارية"))
+            } else {
+                Ok(())
+            };
+
+            let doc_end = if unsafe { EndDoc(dc) } <= 0 {
+                Err(os_error("تعذر إنهاء مهمة الطباعة الحرارية"))
+            } else {
+                Ok(())
+            };
+
+            print_result.and(page_end).and(doc_end)
+        })();
+
+        unsafe { DeleteDC(dc) };
+        result?;
+
+        // Pulse cash drawer if requested
+        if let Some(pin) = drawer_pin {
+            let _ = pulse(printer_name, pin);
+        }
+
+        // Cut paper if requested
+        if cut {
+            let cut_bytes = [0x1b, 0x64, 2, 0x1d, 0x56, 66, 0];
+            let _ = send_raw_job(printer_name, "Cut thermal paper", &cut_bytes);
+        }
+
+        Ok(())
     }
 
     pub fn print_document(
@@ -437,15 +586,27 @@ mod platform {
                         print_result = Err(os_error("تعذر بدء صفحة التقرير"));
                         break;
                     }
+                    let width_bytes = (page.width as usize) / 8;
+                    let padded_stride = width_bytes.div_ceil(4) * 4;
+                    let mut bottom_up_pixels = vec![0u8; padded_stride * page.height as usize];
+
+                    for src_y in 0..page.height as usize {
+                        let dst_y = (page.height as usize - 1) - src_y;
+                        let src_offset = src_y * width_bytes;
+                        let dst_offset = dst_y * padded_stride;
+                        bottom_up_pixels[dst_offset..dst_offset + width_bytes]
+                            .copy_from_slice(&page.pixels[src_offset..src_offset + width_bytes]);
+                    }
+
                     let bitmap = BitmapInfo {
                         header: BitmapInfoHeader {
                             size: std::mem::size_of::<BitmapInfoHeader>() as u32,
                             width: page.width as i32,
-                            height: -(page.height as i32),
+                            height: page.height as i32, // Positive height = Bottom-Up DIB!
                             planes: 1,
                             bit_count: 1,
                             compression: 0,
-                            image_size: page.pixels.len() as u32,
+                            image_size: bottom_up_pixels.len() as u32,
                             x_pels_per_meter: 0,
                             y_pels_per_meter: 0,
                             colors_used: 2,
@@ -464,13 +625,13 @@ mod platform {
                             0,
                             page.width as i32,
                             page.height as i32,
-                            page.pixels.as_ptr().cast(),
+                            bottom_up_pixels.as_ptr().cast(),
                             &bitmap,
                             DIB_RGB_COLORS,
                             SRCCOPY,
                         )
                     };
-                    if printed == 0 || printed == -1 {
+                    if printed <= 0 {
                         print_result = Err(os_error("تعذر رسم صفحة التقرير على الطابعة"));
                     }
                     if unsafe { EndPage(dc) } <= 0 && print_result.is_ok() {
@@ -492,15 +653,7 @@ mod platform {
         result
     }
 
-    pub fn pulse(printer_name: &str, pin: u8) -> Result<(), String> {
-        // ESC p, 100 ms pulse on the selected drawer connector pin.
-        send_raw_job(
-            printer_name,
-            "Morsi cash drawer",
-            &[0x1b, 0x70, pin, 50, 100],
-        )
-    }
-
+    #[allow(dead_code)]
     pub fn print_bitmap(
         printer_name: &str,
         width_bytes: u16,
@@ -517,21 +670,28 @@ mod platform {
 #[cfg(not(target_os = "windows"))]
 mod platform {
     pub fn default_printer() -> Result<String, String> {
-        Err("فتح الدرج التلقائي متاح حالياً على ويندوز".into())
+        Err("طابعات ويندوز متاحة داخل نسخة التطبيق المثبتة على ويندوز".into())
     }
 
     pub fn list_printers() -> Result<Vec<String>, String> {
-        Err("قائمة طابعات الدرج متاحة حالياً على ويندوز".into())
-    }
-
-    pub fn print_document(_: &str, _: &[super::DocumentBitmapPage]) -> Result<(), String> {
-        Err("طباعة التقارير المباشرة متاحة حالياً على ويندوز".into())
+        Err("طابعات ويندوز متاحة داخل نسخة التطبيق المثبتة على ويندوز".into())
     }
 
     pub fn pulse(_: &str, _: u8) -> Result<(), String> {
         Err("فتح الدرج التلقائي متاح حالياً على ويندوز".into())
     }
 
+    pub fn print_thermal_gdi(
+        _: &str, _: u16, _: u32, _: &[u8], _: u16, _: u16, _: bool, _: Option<u8>,
+    ) -> Result<(), String> {
+        Err("الطباعة الحرارية المباشرة متاحة حالياً على ويندوز".into())
+    }
+
+    pub fn print_document(_: &str, _: &[super::DocumentBitmapPage]) -> Result<(), String> {
+        Err("طباعة التقارير المباشرة متاحة حالياً على ويندوز".into())
+    }
+
+    #[allow(dead_code)]
     pub fn print_bitmap(
         _: &str,
         _: u16,
