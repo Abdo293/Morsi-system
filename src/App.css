@@ -308,6 +308,14 @@ input[type=number] {
   margin: 3px 0 2px;
 }
 
+.barcode-label-svg-wrap svg {
+  display: block;
+  margin: 0 auto;
+  max-width: 95%;
+  height: auto;
+  shape-rendering: crispEdges;
+}
+
 .barcode-label-code {
   font-family: 'Courier New', Courier, monospace;
   font-size: 12.5px;
@@ -421,21 +429,23 @@ input[type=number] {
   .barcode-label-inner { gap: 0.3mm !important; }
   .barcode-label-svg-wrap { margin: 0 !important; }
   .barcode-label-svg-wrap svg {
-    width: 68% !important;
-    max-width: 72% !important;
-    height: 8.5mm !important;
-    margin: 0 auto !important;
     display: block !important;
+    margin: 0 auto !important;
+    max-width: 95% !important;
+    height: auto !important;
+    shape-rendering: crispEdges !important;
   }
   .barcode-label-card.size-compact .barcode-label-svg-wrap svg {
-    width: 68% !important;
-    max-width: 70% !important;
-    height: 7mm !important;
+    display: block !important;
+    margin: 0 auto !important;
+    max-width: 95% !important;
+    height: auto !important;
   }
   .barcode-label-card.size-large .barcode-label-svg-wrap svg {
-    width: 68% !important;
-    max-width: 72% !important;
-    height: 11mm !important;
+    display: block !important;
+    margin: 0 auto !important;
+    max-width: 95% !important;
+    height: auto !important;
   }
   .barcode-label-name { font-size: 9.5pt !important; }
   .barcode-label-variant,

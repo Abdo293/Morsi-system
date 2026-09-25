@@ -11713,32 +11713,141 @@ function SalesReport({
 
 export default App;
 
-function generateBarcodeBits(code: string): string {
-  const patterns: Record<string, string> = {
-    '0': '101001101101', '1': '110100101011', '2': '101100101011', '3': '110110010101',
-    '4': '101001101011', '5': '110100110101', '6': '101100110101', '7': '101001011011',
-    '8': '110100101101', '9': '101100101101', 'A': '110101001011', 'B': '101101001011',
-    'C': '110110100101', 'D': '101011001011', 'E': '110101100101', 'F': '101101100101',
-    'G': '101010011011', 'H': '110101001101', 'I': '101101001101', 'J': '101011001101',
-    'K': '110101010011', 'L': '101101010011', 'M': '110110101001', 'N': '101011010011',
-    'O': '110101101001', 'P': '101101101001', 'Q': '101010110011', 'R': '110101011001',
-    'S': '101101011001', 'T': '101011011001', 'U': '110010101011', 'V': '100110101011',
-    'W': '110011010101', 'X': '100101101011', 'Y': '110010110101', 'Z': '100110110101',
-    '-': '100101011011', '.': '110010101101', ' ': '100110101101', '*': '100101101101'
-  };
-  const clean = (code || "10001").toUpperCase().replace(/[^A-Z0-9\-\.\s]/g, "0");
-  const str = `*${clean}*`;
-  let bits = "";
-  for (let i = 0; i < str.length; i++) {
-    bits += (patterns[str[i]] || patterns['0']) + "0";
+type BarcodeSymbology = "code128" | "code39";
+
+const CODE128_PATTERNS = [
+  "212222", "222122", "222221", "121223", "121322", "131222", "122213", "122312", "132212", "221213",
+  "221312", "231212", "112232", "122132", "122231", "113222", "123122", "123221", "223211", "221132",
+  "221231", "213212", "223112", "312131", "311222", "321122", "321221", "312212", "322112", "322211",
+  "212123", "212321", "232121", "111323", "131123", "131321", "112313", "132113", "132311", "211313",
+  "231113", "231311", "112133", "112331", "132131", "113123", "113321", "133121", "313121", "211331",
+  "231131", "213113", "213311", "213131", "311123", "311321", "331121", "312113", "312311", "332111",
+  "314111", "221411", "431111", "111224", "111422", "121124", "121421", "141122", "141221", "112214",
+  "112412", "122114", "122411", "142112", "142211", "241211", "221114", "413111", "241112", "134111",
+  "111242", "121142", "121241", "114212", "124112", "124211", "411212", "421112", "421211", "212141",
+  "214121", "412121", "111143", "111341", "131141", "114113", "114311", "411113", "411311", "113141",
+  "114131", "311141", "411131", "211412", "211214", "211232", "2331112"
+];
+
+const CODE39_PATTERNS: Record<string, string> = {
+  "0": "b s b S B s B s b", "1": "B s b S b s b s B", "2": "b s B S b s b s B",
+  "3": "B s B S b s b s b", "4": "b s b S B s b s B", "5": "B s b S B s b s b",
+  "6": "b s B S B s b s b", "7": "b s b S b s B s B", "8": "B s b S b s B s b",
+  "9": "b s B S b s B s b", "A": "B s b s b S b s B", "B": "b s B s b S b s B",
+  "C": "B s B s b S b s b", "D": "b s b s B S b s B", "E": "B s b s B S b s b",
+  "F": "b s B s B S b s b", "G": "b s b s b S B s B", "H": "B s b s b S B s b",
+  "I": "b s B s b S B s b", "J": "b s b s B S B s b", "K": "B s b s b s b S B",
+  "L": "b s B s b s b S B", "M": "B s B s b s b S b", "N": "b s b s B s b S B",
+  "O": "B s b s B s b S b", "P": "b s B s B s b S b", "Q": "b s b s b s B S B",
+  "R": "B s b s b s B s b", "S": "b s B s b s B s b", "T": "b s b s B s B S b",
+  "U": "B S b s b s b s B", "V": "b S B s b s b s B", "W": "B S B s b s b s b",
+  "X": "b S b s B s b s B", "Y": "B S b s B s b s b", "Z": "b S B s B s b s b",
+  "-": "b S b s b s B s B", ".": "B S b s b s B s b", " ": "b S B s b s B s b",
+  "*": "b S b s B s B s b", "$": "b S b S b S b s b", "/": "b S b S b s b S b",
+  "+": "b S b s b S b S b", "%": "b s b S b S b S b"
+};
+
+function generateBarcodeBits(code: string, symbology: BarcodeSymbology = "code128"): string {
+  if (symbology === "code39") {
+    const clean = (code || "10001").toUpperCase().trim().replace(/[^0-9A-Z\-\. \$\/\+\%]/g, "0") || "10001";
+    const full = `*${clean}*`;
+    let bits = "";
+    for (let i = 0; i < full.length; i++) {
+      const ch = full[i];
+      const elements = (CODE39_PATTERNS[ch] || CODE39_PATTERNS["0"]).split(" ");
+      for (const el of elements) {
+        if (el === "b") bits += "1";
+        else if (el === "B") bits += "111"; // true standard 3:1 wide ratio
+        else if (el === "s") bits += "0";
+        else if (el === "S") bits += "000"; // true standard 3:1 wide ratio
+      }
+      if (i < full.length - 1) {
+        bits += "0"; // 1-module intercharacter space
+      }
+    }
+    const quiet = "0".repeat(15);
+    return quiet + bits + quiet;
   }
-  // Quiet zones at both ends (10 modules each) required by optical barcode scanners
-  return "0000000000" + bits + "0000000000";
+
+  // Default: Code 128 (Auto C / B) - Universal high-density standard
+  const clean = (code || "10001").trim().replace(/[^\x20-\x7E]/g, "") || "10001";
+  const indices: number[] = [];
+  const isPureDigits = /^\d+$/.test(clean) && clean.length >= 2;
+
+  if (isPureDigits) {
+    indices.push(105); // Start C
+    let i = 0;
+    while (i < clean.length) {
+      if (i + 1 < clean.length) {
+        indices.push(parseInt(clean.slice(i, i + 2), 10));
+        i += 2;
+      } else {
+        indices.push(100); // Code B switch
+        indices.push(clean.charCodeAt(i) - 32);
+        i += 1;
+      }
+    }
+  } else {
+    indices.push(104); // Start B
+    for (let i = 0; i < clean.length; i++) {
+      const charCode = clean.charCodeAt(i);
+      indices.push(charCode >= 32 && charCode <= 126 ? charCode - 32 : 0);
+    }
+  }
+
+  // Checksum Modulo 103
+  let chk = indices[0];
+  for (let i = 1; i < indices.length; i++) {
+    chk += indices[i] * i;
+  }
+  indices.push(chk % 103);
+  indices.push(106); // Stop
+
+  let bits = "";
+  for (const idx of indices) {
+    const pat = CODE128_PATTERNS[idx] || CODE128_PATTERNS[0];
+    let isBar = true;
+    for (let j = 0; j < pat.length; j++) {
+      const count = parseInt(pat[j], 10);
+      bits += (isBar ? "1" : "0").repeat(count);
+      isBar = !isBar;
+    }
+  }
+
+  // Standard 15-module quiet zone at both ends
+  const quiet = "0".repeat(15);
+  return quiet + bits + quiet;
 }
 
-function BarcodeSVG({ code, width = 125, height = 34 }: { code: string; width?: number; height?: number }) {
-  const bits = generateBarcodeBits(code);
-  const barWidth = width / bits.length;
+function BarcodeSVG({
+  code,
+  symbology = "code128",
+  labelSize = "standard",
+}: {
+  code: string;
+  symbology?: BarcodeSymbology;
+  labelSize?: "compact" | "standard" | "large";
+}) {
+  const bits = generateBarcodeBits(code, symbology);
+  const totalModules = bits.length;
+
+  // Calculate integer module width (printer dots per module)
+  let moduleWidth = 2;
+  let barHeight = 58;
+
+  if (labelSize === "compact") {
+    moduleWidth = totalModules * 2 <= 280 ? 2 : 1;
+    barHeight = 44;
+  } else if (labelSize === "large") {
+    moduleWidth = totalModules * 3 <= 440 ? 3 : totalModules * 2 <= 440 ? 2 : 1;
+    barHeight = 74;
+  } else {
+    // standard
+    moduleWidth = totalModules * 3 <= 360 ? 3 : totalModules * 2 <= 360 ? 2 : 1;
+    barHeight = 58;
+  }
+
+  const svgWidth = totalModules * moduleWidth;
 
   const bars: { x: number; width: number }[] = [];
   let startIdx: number | null = null;
@@ -11746,30 +11855,43 @@ function BarcodeSVG({ code, width = 125, height = 34 }: { code: string; width?: 
     if (bits[i] === "1") {
       if (startIdx === null) startIdx = i;
     } else if (startIdx !== null) {
-      bars.push({ x: startIdx * barWidth, width: (i - startIdx) * barWidth });
+      bars.push({
+        x: startIdx * moduleWidth,
+        width: (i - startIdx) * moduleWidth,
+      });
       startIdx = null;
     }
   }
   if (startIdx !== null) {
-    bars.push({ x: startIdx * barWidth, width: (bits.length - startIdx) * barWidth });
+    bars.push({
+      x: startIdx * moduleWidth,
+      width: (bits.length - startIdx) * moduleWidth,
+    });
   }
 
   return (
     <svg
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
+      width={svgWidth}
+      height={barHeight}
+      viewBox={`0 0 ${svgWidth} ${barHeight}`}
+      preserveAspectRatio="xMidYMid meet"
       shapeRendering="crispEdges"
-      style={{ display: "block", margin: "0 auto", shapeRendering: "crispEdges" }}
+      style={{
+        display: "block",
+        margin: "0 auto",
+        maxWidth: "96%",
+        height: "auto",
+        shapeRendering: "crispEdges",
+      }}
     >
-      <rect x={0} y={0} width={width} height={height} fill="#fff" />
+      <rect x={0} y={0} width={svgWidth} height={barHeight} fill="#fff" />
       {bars.map((bar, idx) => (
         <rect
           key={idx}
           x={bar.x}
           y={0}
           width={bar.width}
-          height={height}
+          height={barHeight}
           fill="#000"
         />
       ))}
@@ -11779,22 +11901,28 @@ function BarcodeSVG({ code, width = 125, height = 34 }: { code: string; width?: 
 
 async function thermalCanvas(node: HTMLElement, targetWidth: number, targetHeight?: number): Promise<HTMLCanvasElement> {
   await document.fonts.ready;
-  const bounds = node.getBoundingClientRect();
-  const source = await toCanvas(node, {
+  const desiredHeight = targetHeight ?? Math.round(node.scrollHeight * (targetWidth / (node.clientWidth || 1)));
+  const output = await toCanvas(node, {
     backgroundColor: "#fff",
-    pixelRatio: 2,
-    width: bounds.width,
-    height: node.scrollHeight,
-    style: { maxHeight: "none", overflow: "visible", boxShadow: "none", borderRadius: "0" },
+    pixelRatio: 1,
+    width: targetWidth,
+    height: desiredHeight,
+    canvasWidth: targetWidth,
+    canvasHeight: desiredHeight,
+    style: {
+      width: `${targetWidth}px`,
+      height: `${desiredHeight}px`,
+      maxHeight: "none",
+      maxWidth: "none",
+      overflow: "visible",
+      boxShadow: "none",
+      borderRadius: "0",
+    },
   });
-  const output = document.createElement("canvas");
-  output.width = targetWidth;
-  output.height = targetHeight ?? Math.ceil(source.height * targetWidth / source.width);
   const context = output.getContext("2d");
-  if (!context) throw new Error("تعذر تجهيز صورة الطباعة");
-  context.fillStyle = "#fff";
-  context.fillRect(0, 0, output.width, output.height);
-  context.drawImage(source, 0, 0, output.width, output.height);
+  if (context) {
+    context.imageSmoothingEnabled = false;
+  }
   return output;
 }
 
@@ -11851,7 +11979,12 @@ function ThermalReceiptModal({
   const receiptRef = useRef<HTMLDivElement>(null);
   const [receiptPrinter, setReceiptPrinter] = useState(() => localStorage.getItem("morsi.receiptPrinter") || localStorage.getItem("morsi.drawerPrinter") || "");
   const [printerNames, setPrinterNames] = useState<string[]>([]);
-  const [drawerPin, setDrawerPin] = useState<0 | 1>(() => localStorage.getItem("morsi.drawerPin") === "1" ? 1 : 0);
+  const [drawerPin, setDrawerPin] = useState<0 | 1 | 2>(() => {
+    const saved = localStorage.getItem("morsi.drawerPin");
+    if (saved === "1") return 1;
+    if (saved === "2") return 2;
+    return 0;
+  });
   const [autoOpenDrawer, setAutoOpenDrawer] = useState(() => localStorage.getItem("morsi.autoOpenDrawer") !== "false");
   const [autoCutPaper, setAutoCutPaper] = useState(() => localStorage.getItem("morsi.autoCutPaper") === "true");
   const [drawerNotice, setDrawerNotice] = useState("");
@@ -11916,8 +12049,13 @@ function ThermalReceiptModal({
   const openDrawer = useCallback(async () => {
     try {
       const printer = receiptPrinter.trim() || (isTauri() ? await invoke<string>("get_default_receipt_printer").catch(() => "") : "");
+      if (!printer) {
+        setDrawerNotice("يرجى اختيار طابعة الفواتير المتصل بها الدرج أولاً");
+        return;
+      }
       await invoke("pulse_cash_drawer", { printerName: printer, pin: drawerPin });
-      setDrawerNotice("تم إرسال أمر فتح الدرج للطابعة بنجاح ⚡");
+      const pinLabel = drawerPin === 0 ? "منفذ 2" : drawerPin === 1 ? "منفذ 5" : "كلا المنفذين 2 و 5";
+      setDrawerNotice(`تم إرسال نبضة فتح الدرج (${pinLabel}) لطابعة: ${printer} ⚡`);
     } catch (error) {
       setDrawerNotice(`تعذر فتح الدرج: ${String(error)}`);
     }
@@ -12136,20 +12274,58 @@ function ThermalReceiptModal({
             />
             أمر قص إضافي من السيستم
           </label>
-          <span style={{ fontSize: "12px", color: "#666" }}>
-            (عبر طابعة: <strong>{receiptPrinter || "الافتراضية"}</strong>)
-          </span>
+          <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
+            <span style={{ fontSize: "12px", color: "#5d3a28", fontWeight: 700 }}>طابعة الدرج:</span>
+            <select
+              aria-label="طابعة الدرج"
+              value={receiptPrinter}
+              onChange={(e) => changeReceiptPrinter(e.target.value)}
+              style={{
+                padding: "3px 8px",
+                fontSize: "12px",
+                fontWeight: "bold",
+                borderRadius: "6px",
+                border: "1.5px solid #c99a59",
+                background: "#fff",
+                color: "#34231c",
+                cursor: "pointer",
+              }}
+            >
+              {printerNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+              {receiptPrinter && !printerNames.includes(receiptPrinter) && (
+                <option value={receiptPrinter}>{receiptPrinter}</option>
+              )}
+              {!printerNames.length && !receiptPrinter && (
+                <option value="">(الافتراضية)</option>
+              )}
+            </select>
+          </div>
           <select
             aria-label="منفذ الدرج"
             value={drawerPin}
             onChange={(event) => {
-              const pin = Number(event.target.value) as 0 | 1;
+              const pin = Number(event.target.value) as 0 | 1 | 2;
               setDrawerPin(pin);
               localStorage.setItem("morsi.drawerPin", String(pin));
             }}
+            style={{
+              padding: "3px 8px",
+              fontSize: "12px",
+              fontWeight: "bold",
+              borderRadius: "6px",
+              border: "1.5px solid #c99a59",
+              background: "#fff",
+              color: "#34231c",
+              cursor: "pointer",
+            }}
           >
-            <option value={0}>منفذ 2</option>
-            <option value={1}>منفذ 5</option>
+            <option value={0}>منفذ 2 (Pin 2 - قياسي)</option>
+            <option value={1}>منفذ 5 (Pin 5)</option>
+            <option value={2}>كلا المنفذين معاً (Pin 2 & 5)</option>
           </select>
           <button type="button" className="secondary" onClick={() => void openDrawer()}>
             تجربة فتح الدرج ⚡
@@ -13038,6 +13214,12 @@ function PreviewBarcodeModal({
     return "compact";
   });
 
+  const [barcodeSymbology, setBarcodeSymbology] = useState<BarcodeSymbology>(() => {
+    const saved = localStorage.getItem("morsi.barcodeSymbology");
+    if (saved === "code39" || saved === "code128") return saved;
+    return "code128";
+  });
+
   const handleSelectLabelSize = (size: "standard" | "compact" | "large") => {
     setLabelSize(size);
     localStorage.setItem("morsi.barcodeLabelSize", size);
@@ -13085,7 +13267,7 @@ function PreviewBarcodeModal({
 
       for (let index = 0; index < stickersToPrint.length; index++) {
         const item = stickersToPrint[index];
-        const cacheKey = `${item.key}_${labelSize}_${showName}_${showVariantInfo}_${showLocation}_${showPrice}`;
+        const cacheKey = `${item.key}_${labelSize}_${barcodeSymbology}_${showName}_${showVariantInfo}_${showLocation}_${showPrice}`;
         let cached = pixelCache.get(cacheKey);
         if (!cached) {
           const domCard = labels[index];
@@ -13095,6 +13277,7 @@ function PreviewBarcodeModal({
             page.height = labelHeight;
             const context = page.getContext("2d");
             if (!context) throw new Error("تعذر تجهيز ملصقات الطباعة");
+            context.imageSmoothingEnabled = false;
             context.fillStyle = "#fff";
             context.fillRect(0, 0, page.width, page.height);
             const label = await thermalCanvas(domCard, labelWidth, labelHeight);
@@ -13197,35 +13380,63 @@ function PreviewBarcodeModal({
             </label>
           </div>
 
-          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-            <span style={{ fontSize: "12px", color: "#785038", fontWeight: 600 }}>حجم الملصق:</span>
-            <button
-              type="button"
-              className={`thermal-size-btn ${labelSize === "compact" ? "active" : ""}`}
-              onClick={() => handleSelectLabelSize("compact")}
-              style={{ fontSize: "11px", padding: "4px 8px" }}
-              title="المقاس الصغير 40×25 مم"
-            >
-              40×25 مم (صغير)
-            </button>
-            <button
-              type="button"
-              className={`thermal-size-btn ${labelSize === "standard" ? "active" : ""}`}
-              onClick={() => handleSelectLabelSize("standard")}
-              style={{ fontSize: "11px", padding: "4px 8px" }}
-              title="المقاس الوسط 50×30 مم"
-            >
-              50×30 مم (وسط)
-            </button>
-            <button
-              type="button"
-              className={`thermal-size-btn ${labelSize === "large" ? "active" : ""}`}
-              onClick={() => handleSelectLabelSize("large")}
-              style={{ fontSize: "11px", padding: "4px 8px" }}
-              title="المقاس الكبير 60×40 مم"
-            >
-              60×40 مم (كبير)
-            </button>
+          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: "#5d3a28", fontWeight: 700 }}>نوع التشفير:</span>
+              <select
+                aria-label="نوع تشفير الباركود"
+                value={barcodeSymbology}
+                onChange={(e) => {
+                  const val = e.target.value as BarcodeSymbology;
+                  setBarcodeSymbology(val);
+                  localStorage.setItem("morsi.barcodeSymbology", val);
+                }}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  border: "1.5px solid #c99a59",
+                  background: "#fff",
+                  color: "#34231c",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="code128">Code 128 (موصى به - أسرع وأسهل قراءة)</option>
+                <option value="code39">Code 39 (النمط الكلاسيكي 3:1)</option>
+              </select>
+            </div>
+
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: "#785038", fontWeight: 600 }}>حجم الملصق:</span>
+              <button
+                type="button"
+                className={`thermal-size-btn ${labelSize === "compact" ? "active" : ""}`}
+                onClick={() => handleSelectLabelSize("compact")}
+                style={{ fontSize: "11px", padding: "4px 8px" }}
+                title="المقاس الصغير 40×25 مم"
+              >
+                40×25 مم (صغير)
+              </button>
+              <button
+                type="button"
+                className={`thermal-size-btn ${labelSize === "standard" ? "active" : ""}`}
+                onClick={() => handleSelectLabelSize("standard")}
+                style={{ fontSize: "11px", padding: "4px 8px" }}
+                title="المقاس الوسط 50×30 مم"
+              >
+                50×30 مم (وسط)
+              </button>
+              <button
+                type="button"
+                className={`thermal-size-btn ${labelSize === "large" ? "active" : ""}`}
+                onClick={() => handleSelectLabelSize("large")}
+                style={{ fontSize: "11px", padding: "4px 8px" }}
+                title="المقاس الكبير 60×40 مم"
+              >
+                60×40 مم (كبير)
+              </button>
+            </div>
           </div>
         </div>
 
@@ -13260,8 +13471,8 @@ function PreviewBarcodeModal({
                     <div className="barcode-label-svg-wrap">
                       <BarcodeSVG
                         code={code}
-                        width={labelSize === "compact" ? 140 : labelSize === "large" ? 220 : 180}
-                        height={labelSize === "compact" ? 42 : labelSize === "large" ? 70 : 54}
+                        symbology={barcodeSymbology}
+                        labelSize={labelSize}
                       />
                       <div className="barcode-label-code">{code}</div>
                     </div>

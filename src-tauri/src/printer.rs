@@ -32,7 +32,7 @@ pub async fn pulse_cash_drawer(printer_name: String, pin: u8) -> Result<(), Stri
     } else {
         name
     };
-    if pin > 1 {
+    if pin > 2 {
         return Err("منفذ الدرج غير صالح".into());
     }
     tauri::async_runtime::spawn_blocking(move || platform::pulse(&target, pin))
@@ -60,7 +60,7 @@ pub async fn print_thermal_bitmap(
     if pixels.len() != width_bytes as usize * height as usize {
         return Err("بيانات الصورة الحرارية غير مكتملة".into());
     }
-    if drawer_pin.is_some_and(|pin| pin > 1) {
+    if drawer_pin.is_some_and(|pin| pin > 2) {
         return Err("منفذ الدرج غير صالح".into());
     }
 
@@ -442,19 +442,12 @@ mod platform {
                 sent += written as usize;
             }
 
-            let page_end_error = if page_started && unsafe { EndPagePrinter(handle) } == 0 {
-                Some(os_error("تعذر إنهاء صفحة الطباعة"))
-            } else {
-                None
-            };
+            if page_started {
+                unsafe { EndPagePrinter(handle) };
+            }
+            unsafe { EndDocPrinter(handle) };
 
-            let doc_end_error = if unsafe { EndDocPrinter(handle) } == 0 {
-                Some(os_error("تعذر إنهاء مهمة الطباعة"))
-            } else {
-                None
-            };
-
-            if let Some(err) = error.or(page_end_error).or(doc_end_error) {
+            if let Some(err) = error {
                 Err(err)
             } else {
                 Ok(())
@@ -465,34 +458,32 @@ mod platform {
     }
 
     pub fn drawer_kick_bytes(pin: Option<u8>) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(64);
+        let mut bytes = Vec::with_capacity(32);
 
-        // 1. DLE DC4 real-time kick out (bypasses buffers, works in graphics/driver mode)
-        bytes.extend_from_slice(&[0x10, 0x14, 0x01, 0x00, 0x08]); // pin 2
-        bytes.extend_from_slice(&[0x10, 0x14, 0x01, 0x01, 0x08]); // pin 5
+        // 1. ESC @ to reset printer command parser state
+        bytes.extend_from_slice(&[0x1b, 0x40]);
 
-        // 2. Standard ESC/POS ESC p: [0x1b, 0x70, pin, on_time, off_time]
-        // Send strong 120ms pulse for both Pin 2 and Pin 5, numeric and ASCII ('0', '1')
         match pin {
             Some(1) => {
-                bytes.extend_from_slice(&[0x1b, 0x70, 1, 60, 255]);
-                bytes.extend_from_slice(&[0x1b, 0x70, 49, 60, 255]);
-                bytes.extend_from_slice(&[0x1b, 0x70, 0, 60, 255]);
-                bytes.extend_from_slice(&[0x1b, 0x70, 48, 60, 255]);
+                // Pin 5
+                bytes.extend_from_slice(&[0x1b, 0x70, 1, 50, 100]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 49, 50, 100]);
+            }
+            Some(2) => {
+                // Both Pin 2 & Pin 5
+                bytes.extend_from_slice(&[0x1b, 0x70, 0, 50, 50]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 48, 50, 50]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 1, 50, 50]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 49, 50, 50]);
+                bytes.push(0x07);
             }
             _ => {
-                bytes.extend_from_slice(&[0x1b, 0x70, 0, 60, 255]);
-                bytes.extend_from_slice(&[0x1b, 0x70, 48, 60, 255]);
-                bytes.extend_from_slice(&[0x1b, 0x70, 1, 60, 255]);
-                bytes.extend_from_slice(&[0x1b, 0x70, 49, 60, 255]);
+                // Default: Pin 2 (Standard ESC/POS drawer kick)
+                bytes.extend_from_slice(&[0x1b, 0x70, 0, 50, 100]);
+                bytes.extend_from_slice(&[0x1b, 0x70, 48, 50, 100]);
+                bytes.push(0x07);
             }
         }
-
-        // 3. Star Micronics & POS BEL character
-        bytes.push(0x07);
-
-        // 4. FS p alternative drawer kick
-        bytes.extend_from_slice(&[0x1c, 0x70, 0, 60, 255]);
 
         bytes
     }
@@ -643,8 +634,12 @@ mod platform {
             raw_post.extend_from_slice(&[0x1d, 0x56, 66, 0]);
         }
         if !raw_post.is_empty() {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            let _ = send_raw_job(printer_name, "Drawer/Cut", &raw_post);
+            std::thread::sleep(std::time::Duration::from_millis(350));
+            if let Err(err) = send_raw_job(printer_name, "Drawer/Cut", &raw_post) {
+                eprintln!("Failed to send drawer/cut job: {}", err);
+                std::thread::sleep(std::time::Duration::from_millis(350));
+                let _ = send_raw_job(printer_name, "Drawer/Cut", &raw_post);
+            }
         }
 
         Ok(())

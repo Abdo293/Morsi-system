@@ -553,11 +553,11 @@ export function printBarcodeStickersHtml(
       margin: 1px 0;
     }
     .barcode-label-svg-wrap svg {
-      width: 92% !important;
-      max-width: 95% !important;
-      height: ${labelSize === "compact" ? "38px" : labelSize === "standard" ? "52px" : "72px"} !important;
-      display: block;
+      display: block !important;
       margin: 0 auto !important;
+      max-width: 95% !important;
+      height: auto !important;
+      shape-rendering: crispEdges !important;
     }
     .barcode-label-code {
       font-family: 'Courier New', Courier, monospace;
