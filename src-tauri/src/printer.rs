@@ -241,12 +241,14 @@ mod platform {
         fn SetDefaultPrinterW(name: *const u16) -> i32;
         fn OpenPrinterW(name: *mut u16, handle: *mut *mut c_void, defaults: *mut c_void) -> i32;
         fn StartDocPrinterW(handle: *mut c_void, level: u32, info: *mut u8) -> u32;
+        fn StartPagePrinter(handle: *mut c_void) -> i32;
         fn WritePrinter(
             handle: *mut c_void,
             data: *const c_void,
             size: u32,
             written: *mut u32,
         ) -> i32;
+        fn EndPagePrinter(handle: *mut c_void) -> i32;
         fn EndDocPrinter(handle: *mut c_void) -> i32;
         fn ClosePrinter(handle: *mut c_void) -> i32;
     }
